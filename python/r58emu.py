@@ -247,6 +247,28 @@ class Radio:
             return {n for k, n in enumerate(CU53_ICONS) if self.icons_raw >> k & 1}
         return self.icons_raw
 
+    # CU53AN digit positions: {f,e,c,b} at base..base+3, {a,g,d} at base+64..
+    _CU53_UPPER = (32, 36, 40, 44, 48, 52)
+    _CU53_LOWER = (56, 60, 0, 4, 8, 12, 16, 20, 24, 28)
+
+    def glyphs(self):
+        """CU53AN: ([6 upper], [10 lower]) 7-segment glyph bytes in the
+        firmware's font encoding (bit0 f, e, c, b, a, g, bit6 d)."""
+        raw = self.display_raw()
+
+        def seg(p):
+            return raw[p >> 3] >> (p & 7) & 1
+
+        def glyph(b):
+            g = 0
+            for i in range(4):
+                g |= seg(b + i) << i
+            for i in range(3):
+                g |= seg(b + 64 + i) << (4 + i)
+            return g
+        return ([glyph(b) for b in self._CU53_UPPER],
+                [glyph(b) for b in self._CU53_LOWER])
+
     def display_raw(self):
         buf = C.create_string_buffer(64)
         n = self.L.r58api_display_raw(self.m, buf)

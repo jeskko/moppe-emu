@@ -796,7 +796,7 @@ r58_run(r58 *m, double seconds)
 /* cu53an_font (hardware 7-seg encoding: bit0 f, 1 e, 2 c, 3 b, 4 a, 5 g, 6 d)
  * used for reverse lookup; preference order decides ambiguous glyphs */
 static const char cu53_pref[] =
-	"0123456789 -_AbCdEFGHIJLnoPqrStUY=\"'?:";
+	"0123456789 -_AbCdEFGHIJLnoPqrStUY=\"'?:cehijlu[]^";
 
 static uint8_t
 cu53_glyph_of(char ch)
@@ -809,7 +809,9 @@ cu53_glyph_of(char ch)
 		['H'] = 0x2f, ['I'] = 0x0c, ['J'] = 0x4e, ['L'] = 0x43, ['n'] = 0x26,
 		['o'] = 0x66, ['P'] = 0x3b, ['q'] = 0x3d, ['r'] = 0x22, ['S'] = 0x75,
 		['t'] = 0x63, ['U'] = 0x4f, ['Y'] = 0x6d, ['='] = 0x60, ['"'] = 0x09,
-		['\''] = 0x08, ['?'] = 0x3a, [':'] = 0x50,
+		['\''] = 0x08, ['?'] = 0x3a, [':'] = 0x50, ['c'] = 0x62,
+		['e'] = 0x62, ['h'] = 0x27, ['i'] = 0x04, ['j'] = 0x44, ['l'] = 0x42,
+		['u'] = 0x46, ['['] = 0x53, [']'] = 0x5c, ['^'] = 0x10,
 	};
 	return font[(unsigned char)ch];
 }
