@@ -93,9 +93,18 @@ ram_ptr(r58 *m, uint16_t a)
 static uint8_t
 window_read(r58 *m, uint16_t a)
 {
-	if (m->card == R58_P8E && (m->out2 & O2_RS))
+	/* P8N (service manual p87-90): RS=1 selects EPROM0 page 0x8000 or
+	 * 0xC000 by RA14; RS=0 EPROM1 page RA15:RA14 */
+	if (m->card == R58_P8N) {
+		if (m->out2 & O2_RS)
+			return m->rom[0x8000 + ((m->out2 & O2_RA14) ? 0x4000 : 0) + (a & 0x3fff)];
+		if (m->rom1)
+			return m->rom1[(m->out2 & 3) * 0x4000 + (a & 0x3fff)];
+		return m->multiboard;
+	}
+	if (m->out2 & O2_RS)
 		return m->rom[0xC000 | (a & 0x3fff)];
-	if (m->card == R58_P8E && m->rom1) {
+	if (m->rom1) {
 		unsigned bank = (m->out2 & (O2_RA14 | O2_RA15)) | ((m->out2 >> 1) & 4);
 		return m->rom1[bank * 0x4000 + (a & 0x3fff)];
 	}
@@ -644,7 +653,7 @@ r58_init(r58 *m, int card, int cu)
 	memset(m, 0, sizeof(*m));
 	m->card = card;
 	m->cu = cu;
-	m->wd_timeout_s = 0.2;
+	m->wd_timeout_s = 0.52;	/* 74HC4040 at 1968.75 Hz (service manual p86) */
 	m->m1_wait = card == R58_P8E ? 1 : 0;
 	m->hook_offhook_level = 0;
 	m->power_on = 1;
@@ -732,8 +741,12 @@ r58_set_local(r58 *m, int grounded)
 void
 r58_set_hook(r58 *m, int offhook)
 {
+	int changed = m->offhook != !!offhook;
 	m->offhook = !!offhook;
 	m->cu58.offhook = m->offhook;
+	set_pa(m, (m->now % PA0_PERIOD) < PA0_PERIOD / 2);
+	if (changed)
+		modem_irq(m);	/* DCDA is shared: hook, 8254 OUT2, FX429 */
 	update_lines(m);
 }
 
