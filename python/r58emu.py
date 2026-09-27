@@ -78,6 +78,7 @@ def lib():
             "r58api_cu58_buttons": (None, [vp, C.c_int, C.c_int, C.c_int]),
             "r58api_audio_capture": (None, [vp, C.c_uint]),
             "r58api_set_m1_wait": (None, [vp, C.c_int]),
+            "r58api_step": (None, [vp, C.c_int]),
             "r58api_audio_take": (C.c_uint, [vp, C.POINTER(C.c_uint64),
                                               C.c_char_p, C.c_uint]),
         }
@@ -98,7 +99,12 @@ def load_symbols(listing):
             m = rx.match(line)
             if m:
                 syms[m.group(1)] = int(m.group(3), 16)
+                if m.group(2) == "l":
+                    LABELS.setdefault(listing, set()).add(m.group(1))
     return syms
+
+
+LABELS = {}
 
 
 class Radio:
@@ -116,6 +122,7 @@ class Radio:
         if self.L.r58api_load_rom(self.m, rom.encode()):
             raise OSError("cannot load ROM %s" % rom)
         self.sym = load_symbols(listing) if listing else {}
+        self.labels = LABELS.get(listing, set())
         if nv is not None:
             self.set_nv(nv)
         self.events = []
@@ -130,6 +137,11 @@ class Radio:
         rc = self.L.r58api_run(self.m, seconds)
         self._drain()
         return STOP[rc]
+
+    def step(self, n=1):
+        """Execute n instructions."""
+        self.L.r58api_step(self.m, n)
+        self._drain()
 
     @property
     def time(self):
@@ -413,7 +425,7 @@ class Radio:
     def symbolize(self, a):
         best = None
         for n, v in self.sym.items():
-            if v <= a and not n.startswith("_") and v < 0x8000:
+            if v <= a and n in self.labels and v < 0x8000 and "relative_label" not in n:
                 if best is None or v > best[1]:
                     best = (n, v)
         return "%s+%d" % (best[0], a - best[1]) if best else "%04x" % a

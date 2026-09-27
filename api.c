@@ -16,7 +16,8 @@ r58api_new(int card, int cu)
 	return m;
 }
 
-void r58api_free(r58 *m) { free(m); }
+void r58api_free(r58 *m) { free(m->rom1); free(m->aud_t); free(m->aud_v); free(m); }
+int  r58api_load_rom1(r58 *m, const char *p) { return r58_load_rom1(m, p); }
 int  r58api_load_rom(r58 *m, const char *p) { return r58_load_rom(m, p); }
 int  r58api_load_nv(r58 *m, const char *p) { return r58_load_nv(m, p); }
 int  r58api_save_nv(r58 *m, const char *p) { return r58_save_nv(m, p); }
@@ -188,3 +189,4 @@ r58api_audio_take(r58 *m, uint64_t *t, uint8_t *v, unsigned max)
 
 double r58api_xtal(void) { return R58_XTAL_HZ; }
 void r58api_set_m1_wait(r58 *m, int w) { m->m1_wait = w; }
+void r58api_step(r58 *m, int n) { while (n-- > 0) r58_step(m); }

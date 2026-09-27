@@ -30,7 +30,10 @@
 #define O1_TXOFF 0x80
 #define O1_STROBES (O1_SRE | O1_SCE | O1_STE | O1_RAS | O1_TPS)
 
-#define O2_SMEM  0x08
+#define O2_RA14  0x01
+#define O2_RA15  0x02
+#define O2_RS    0x04
+#define O2_SMEM  0x08		/* P8N; on P8E this latch bit is RA16 */
 
 #define PA0_PERIOD 4096		/* xt per 1968.75 Hz cycle */
 
@@ -80,6 +83,25 @@ ram_ptr(r58 *m, uint16_t a)
 	return &m->ram[a - 0xC000];
 }
 
+/*
+ * 0x8000-0xBFFF.  P8E decode (schematic 3C 305838, IC5/IC10-12):
+ * RS=1 selects EPROM0 with its A14,A15 = 1,1 (the 27C512's top 16 KB);
+ * RS=0 selects EPROM1 with A14..A16 = OUT2 bits 0, 1, 3.  The DTMF/CTCSS
+ * "multiboard" plugs into the EPROM1 socket; without an EPROM1 image the
+ * socket reads as the multiboard status byte.
+ */
+static uint8_t
+window_read(r58 *m, uint16_t a)
+{
+	if (m->card == R58_P8E && (m->out2 & O2_RS))
+		return m->rom[0xC000 | (a & 0x3fff)];
+	if (m->card == R58_P8E && m->rom1) {
+		unsigned bank = (m->out2 & (O2_RA14 | O2_RA15)) | ((m->out2 >> 1) & 4);
+		return m->rom1[bank * 0x4000 + (a & 0x3fff)];
+	}
+	return m->multiboard;
+}
+
 static uint8_t
 mem_read(void *ctx, uint16_t a)
 {
@@ -88,7 +110,7 @@ mem_read(void *ctx, uint16_t a)
 	if (a < 0x8000)
 		return m->rom[a];
 	if (a < 0xC000)
-		return (a & 0xff00) == 0x8000 ? m->multiboard : 0xff;
+		return window_read(m, a);
 	return *ram_ptr(m, a);
 }
 
@@ -147,6 +169,20 @@ r58_save_nv(r58 *m, const char *path)
 	size_t n = fwrite(nv_block(m), 1, R58_NV_SIZE, fp);
 	fclose(fp);
 	return n == R58_NV_SIZE ? 0 : -1;
+}
+
+int
+r58_load_rom1(r58 *m, const char *path)
+{
+	FILE *fp = fopen(path, "rb");
+	if (!fp)
+		return -1;
+	if (!m->rom1)
+		m->rom1 = malloc(0x20000);
+	memset(m->rom1, 0xff, 0x20000);
+	size_t n = fread(m->rom1, 1, 0x20000, fp);
+	fclose(fp);
+	return n > 0 ? 0 : -1;
 }
 
 int
@@ -770,6 +806,24 @@ advance(r58 *m, uint64_t dt)
 		pit_clock(&m->pit, 1, clocks);
 	}
 	m->now += dt;
+}
+
+/* execute exactly one instruction (or interrupt acceptance) */
+void
+r58_step(r58 *m)
+{
+	int xt_per_t = m->card == R58_P8E ? 1 : 2;
+
+	if (!m->powered)
+		return;
+	m->trace[m->trace_pos++ % R58_TRACE] = m->cpu.pc;
+	m->cpu.int_line = daisy_int_line(&m->irq);
+	unsigned t = z80_step(&m->cpu) + m->cpu.m1 * m->m1_wait;
+	m->cpu_cycles += t;
+	m->instructions++;
+	advance(m, (uint64_t)t * xt_per_t);
+	serial_tick(m);
+	modem_tick(m);
 }
 
 int

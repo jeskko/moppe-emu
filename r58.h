@@ -98,7 +98,8 @@ typedef struct r58 {
 	cu58af   cu58;
 
 	/* memory */
-	uint8_t  rom[0x8000];
+	uint8_t  rom[0x10000];		/* EPROM0: 27C512 on P8E (32 KB used by FW) */
+	uint8_t *rom1;			/* EPROM1: 27C010, 8 x 16 KB banks, or NULL */
 	uint8_t  ram[0x4000];
 	uint8_t  nvplane[R58_NV_SIZE];	/* P8N SMEM=0 plane */
 
@@ -171,7 +172,8 @@ typedef struct r58 {
 
 /* lifecycle */
 void r58_init(r58 *m, int card, int cu);
-int  r58_load_rom(r58 *m, const char *path);
+int  r58_load_rom(r58 *m, const char *path);	/* EPROM0, up to 64 KB */
+int  r58_load_rom1(r58 *m, const char *path);	/* EPROM1 (P8E), up to 128 KB */
 int  r58_load_nv(r58 *m, const char *path);
 int  r58_save_nv(r58 *m, const char *path);
 void r58_power(r58 *m, int on);		/* flip the power switch */
@@ -180,6 +182,7 @@ void r58_reset(r58 *m);			/* hardware reset (power-up) */
 /* run for at most `seconds` of emulated time; returns stop reason */
 int  r58_run(r58 *m, double seconds);
 double r58_time(const r58 *m);
+void r58_step(r58 *m);			/* one instruction */
 
 /* inputs */
 void r58_set_adc(r58 *m, int ch, uint8_t v);
