@@ -842,7 +842,10 @@ r58_step(r58 *m)
 int
 r58_run(r58 *m, double seconds)
 {
-	uint64_t end = m->now + (uint64_t)(seconds * R58_XTAL_HZ);
+	/* round up: any positive request makes progress (callers pacing to
+	 * a wall clock ask for tiny remainders) */
+	double want = seconds * R58_XTAL_HZ;
+	uint64_t end = m->now + (want > 0 ? (uint64_t)want + ((double)(uint64_t)want < want) : 0);
 	int xt_per_t = m->card == R58_P8E ? 1 : 2;
 	int m1_wait = m->m1_wait;
 	uint64_t wd_xt = (uint64_t)(m->wd_timeout_s * R58_XTAL_HZ);

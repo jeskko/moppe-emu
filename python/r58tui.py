@@ -210,7 +210,7 @@ def main(stdscr, args):
             ch = stdscr.getch()
 
         target = emu0 + (time.monotonic() - t0) * st.speed
-        while r.time < target:
+        while target - r.time > 1e-6:
             step = min(target - r.time, 0.02)
             if pending and r.time + step >= pending[1]:
                 r.run(max(0.0, pending[1] - r.time))
