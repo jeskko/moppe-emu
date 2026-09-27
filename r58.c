@@ -527,7 +527,44 @@ serial_tick(r58 *m)
 static void
 pit_out(void *ctx, int counter, int level, unsigned off)
 {
-	(void)ctx; (void)counter; (void)level; (void)off;
+	r58 *m = ctx;
+
+	if (counter != 1 || !m->aud_cap || m->aud_n >= m->aud_cap)
+		return;
+	/* called from advance() before `now` moves: offset is in CLK1
+	 * periods (2 xt) from the start of the batch */
+	m->aud_t[m->aud_n] = m->now + m->pit01_rem + 2 * (uint64_t)off;
+	m->aud_v[m->aud_n] = level;
+	m->aud_n++;
+}
+
+void
+r58_audio_capture(r58 *m, unsigned capacity)
+{
+	free(m->aud_t);
+	free(m->aud_v);
+	m->aud_t = 0;
+	m->aud_v = 0;
+	m->aud_n = 0;
+	m->aud_cap = 0;
+	if (capacity) {
+		m->aud_t = malloc(capacity * sizeof(*m->aud_t));
+		m->aud_v = malloc(capacity);
+		if (m->aud_t && m->aud_v)
+			m->aud_cap = capacity;
+	}
+}
+
+unsigned
+r58_audio_take(r58 *m, uint64_t *t, uint8_t *v, unsigned max)
+{
+	unsigned n = m->aud_n < max ? m->aud_n : max;
+	memcpy(t, m->aud_t, n * sizeof(*t));
+	memcpy(v, m->aud_v, n);
+	memmove(m->aud_t, m->aud_t + n, (m->aud_n - n) * sizeof(*t));
+	memmove(m->aud_v, m->aud_v + n, m->aud_n - n);
+	m->aud_n -= n;
+	return n;
 }
 
 /* ---------------------------------------------------------------- reset */
@@ -572,6 +609,7 @@ r58_init(r58 *m, int card, int cu)
 	m->card = card;
 	m->cu = cu;
 	m->wd_timeout_s = 0.2;
+	m->m1_wait = card == R58_P8E ? 1 : 0;
 	m->hook_offhook_level = 0;
 	m->power_on = 1;
 	m->powered = 1;
@@ -739,7 +777,7 @@ r58_run(r58 *m, double seconds)
 {
 	uint64_t end = m->now + (uint64_t)(seconds * R58_XTAL_HZ);
 	int xt_per_t = m->card == R58_P8E ? 1 : 2;
-	int m1_wait = m->card == R58_P8E ? 1 : 0;
+	int m1_wait = m->m1_wait;
 	uint64_t wd_xt = (uint64_t)(m->wd_timeout_s * R58_XTAL_HZ);
 	uint64_t next_slow = m->now;
 

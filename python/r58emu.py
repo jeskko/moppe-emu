@@ -22,6 +22,7 @@ EVENTS = {1: "WDRESET", 2: "NMI", 3: "POWEROFF", 4: "POWERON", 5: "TX_ON",
           6: "TX_OFF", 7: "SYNTH", 8: "MODEM_TX", 9: "MBUS_TX", 10: "GPS_TX",
           11: "LCD"}
 STOP = {0: "time", 1: "break", 2: "watch", 3: "off"}
+XTAL = 8064000.0
 
 # CU53AN special segment icons, bit k = position 0x43 + 4k
 CU53_ICONS = ["V_U", "PHONE", "CLOCK", "COLON_UR", "V_D", "COLON_D",
@@ -75,6 +76,10 @@ def lib():
             "r58api_serial_rx": (None, [vp, C.c_int, C.c_char_p, C.c_int]),
             "r58api_modem_rx": (None, [vp, C.c_char_p, C.c_int]),
             "r58api_cu58_buttons": (None, [vp, C.c_int, C.c_int, C.c_int]),
+            "r58api_audio_capture": (None, [vp, C.c_uint]),
+            "r58api_set_m1_wait": (None, [vp, C.c_int]),
+            "r58api_audio_take": (C.c_uint, [vp, C.POINTER(C.c_uint64),
+                                              C.c_char_p, C.c_uint]),
         }
         for name, (res, args) in sig.items():
             f = getattr(L, name)
@@ -326,6 +331,83 @@ class Radio:
         k = ["af", "bc", "de", "hl", "ix", "iy", "sp", "pc", "af_", "bc_",
              "de_", "hl_", "i", "r", "iff1", "im", "halted"]
         return dict(zip(k, o))
+
+    def set_m1_wait(self, n):
+        """Override wait states per M1 cycle (P8E hardware: 1)."""
+        self.L.r58api_set_m1_wait(self.m, n)
+
+    # ---- audio
+    def audio_start(self, capacity=4_000_000):
+        """Record edges of the 8254 counter-1 output (tone / PWM pin)."""
+        self.L.r58api_audio_capture(self.m, capacity)
+        self._aud = []
+
+    def audio_edges(self, arrays=False):
+        """Edges recorded since audio_start / last call: [(t_s, level)],
+        or (times, levels) numpy arrays with arrays=True."""
+        n = 1 << 20
+        ts = (C.c_uint64 * n)()
+        vs = C.create_string_buffer(n)
+        tchunks, vchunks = [], []
+        while True:
+            k = self.L.r58api_audio_take(self.m, ts, vs, n)
+            if arrays:
+                import numpy as np
+                tchunks.append(np.ctypeslib.as_array(ts)[:k] / XTAL)
+                vchunks.append(np.frombuffer(vs.raw[:k], dtype=np.uint8).astype(float))
+            else:
+                tchunks += [ts[i] / XTAL for i in range(k)]
+                vchunks += list(vs.raw[:k])
+            if k < n:
+                break
+        if arrays:
+            import numpy as np
+            return np.concatenate(tchunks), np.concatenate(vchunks)
+        return list(zip(tchunks, vchunks))
+
+    def audio_samples(self, rate=48000, t0=None, t1=None):
+        """Pin waveform box-filtered to `rate` samples/s, centred at 0
+        (level 1 -> +0.5, 0 -> -0.5).  Uses numpy when available."""
+        try:
+            import numpy as np
+        except ImportError:
+            np = None
+        if np is not None:
+            te, lv = self.audio_edges(arrays=True)
+            if not len(te):
+                return []
+            t0 = te[0] if t0 is None else t0
+            t1 = te[-1] if t1 is None else t1
+            n = int((t1 - t0) * rate)
+            # integral of the level at each edge time
+            F = np.concatenate(([0.0], np.cumsum(lv[:-1] * np.diff(te))))
+            tb = t0 + np.arange(n + 1) / rate
+            k = np.clip(np.searchsorted(te, tb, side="right") - 1, 0, len(te) - 1)
+            Fb = F[k] + lv[k] * (tb - te[k])
+            return (np.diff(Fb) * rate - 0.5).tolist()
+        edges = self.audio_edges()
+        if not edges:
+            return []
+        t0 = edges[0][0] if t0 is None else t0
+        t1 = edges[-1][0] if t1 is None else t1
+        n = int((t1 - t0) * rate)
+        out = [0.0] * n
+        dt = 1.0 / rate
+        level = 1 - edges[0][1]
+        k = 0
+        for i in range(n):
+            a, b = t0 + i * dt, t0 + (i + 1) * dt
+            acc, t = 0.0, a
+            while k < len(edges) and edges[k][0] < b:
+                te, lv = edges[k]
+                if te > t:
+                    acc += (te - t) * level
+                    t = te
+                level = lv
+                k += 1
+            acc += (b - t) * level
+            out[i] = acc * rate - 0.5
+        return out
 
     # ---- debugging
     def symbolize(self, a):

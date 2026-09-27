@@ -177,3 +177,14 @@ r58api_cu58_buttons(r58 *m, int speaker, int dark, int power)
 	m->cu58.dark = !!dark;
 	m->cu58.power = !!power;
 }
+
+void r58api_audio_capture(r58 *m, unsigned cap) { r58_audio_capture(m, cap); }
+
+unsigned
+r58api_audio_take(r58 *m, uint64_t *t, uint8_t *v, unsigned max)
+{
+	return r58_audio_take(m, t, v, max);
+}
+
+double r58api_xtal(void) { return R58_XTAL_HZ; }
+void r58api_set_m1_wait(r58 *m, int w) { m->m1_wait = w; }

@@ -86,6 +86,7 @@ typedef struct r58 {
 	int      cu;			/* R58_CU53AN / R58_CU58AF */
 	double   wd_timeout_s;		/* watchdog timeout */
 	int      hook_offhook_level;	/* PA1 level meaning handset lifted */
+	int      m1_wait;		/* wait states per M1 (P8E 1, P8N 0) */
 
 	/* chips */
 	z80      cpu;
@@ -159,6 +160,11 @@ typedef struct r58 {
 	unsigned trace_pos;
 	int      bp_skip;		/* skip bp at current PC once */
 
+	/* audio probe: edges of 8254 OUT1 (tone/PWM pin) */
+	uint64_t *aud_t;
+	uint8_t  *aud_v;
+	unsigned  aud_n, aud_cap;
+
 	/* NV persistence */
 	char     nvfile[512];
 } r58;
@@ -188,6 +194,10 @@ int  r58_key(r58 *m, int key);
 void r58_serial_rx(r58 *m, int chan, const uint8_t *buf, int n);
 /* queue an FSK packet (after sync) to arrive at the FX429 */
 void r58_modem_rx(r58 *m, const uint8_t *buf, int n);
+
+/* audio probe: record 8254 counter-1 output edges (the tone pin) */
+void r58_audio_capture(r58 *m, unsigned capacity);	/* 0 = stop */
+unsigned r58_audio_take(r58 *m, uint64_t *t, uint8_t *v, unsigned max);
 
 /* observation */
 int  r58_next_event(r58 *m, r58_event *e);
