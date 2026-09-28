@@ -154,7 +154,9 @@ def _map_symbols(path):
     for (a, n), (b, _) in zip(order, order[1:] + order[-1:]):
         sizes[n] = b - a
     SIZES[path] = sizes
-    return syms
+    # bank 2 is linked at 0x28000 + offset (tools/ihx2bin.py): the CPU
+    # sees its window address
+    return {n: v & 0xFFFF if 0x28000 <= v < 0x2C000 else v for n, v in syms.items()}
 
 
 LABELS = {}
