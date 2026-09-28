@@ -66,6 +66,7 @@ def lib():
             "r58api_latches": (None, [vp, C.c_char_p]),
             "r58api_pit": (None, [vp, C.c_int, C.POINTER(C.c_uint32)]),
             "r58api_cpu": (None, [vp, C.POINTER(C.c_uint32)]),
+            "r58api_set_cpu": (None, [vp, C.c_int, C.c_uint32]),
             "r58api_instructions": (C.c_ulonglong, [vp]),
             "r58api_next_event": (C.c_int, [vp, C.POINTER(C.c_double),
                                             C.POINTER(C.c_int), C.POINTER(C.c_int)]),
@@ -142,7 +143,8 @@ def _map_symbols(path):
                     labels.add(m.group(2))
     lab = path[:-4] + ".labels"
     if os.path.exists(lab):
-        labels |= {n.strip() for n in open(lab) if n.strip() in syms}
+        with open(lab) as f:
+            labels |= {n.strip() for n in f if n.strip() in syms}
     LABELS[path] = labels
     # size of a label: distance to the next label (as80 gave the size of
     # the defining statement, which is the same for data declarations)
@@ -408,6 +410,21 @@ class Radio:
         k = ["af", "bc", "de", "hl", "ix", "iy", "sp", "pc", "af_", "bc_",
              "de_", "hl_", "i", "r", "iff1", "im", "halted"]
         return dict(zip(k, o))
+
+    def set_cpu(self, **regs):
+        """Set registers: af, bc, de, hl, ix, iy, sp, pc (16-bit values)."""
+        k = ["af", "bc", "de", "hl", "ix", "iy", "sp", "pc"]
+        for name, v in regs.items():
+            self.L.r58api_set_cpu(self.m, k.index(name), v & 0xFFFF)
+
+    def call(self, addr, **regs):
+        """Make the CPU call addr as if the current instruction were a
+        CALL: push the current PC, set the registers, continue at addr."""
+        c = self.cpu()
+        sp = (c["sp"] - 2) & 0xFFFF
+        self.poke(sp, bytes([c["pc"] & 0xFF, c["pc"] >> 8]))
+        self.set_cpu(sp=sp, pc=self.addr(addr), **regs)
+        return c["pc"]
 
     def set_m1_wait(self, n):
         """Override wait states per M1 cycle (P8E hardware: 1)."""

@@ -858,16 +858,17 @@ r58_run(r58 *m, double seconds)
 			return R58_STOP_HALTED_OFF;
 		}
 		uint16_t pc = m->cpu.pc;
-		if (m->bp[pc] && !m->cpu.halted) {
-			if (m->bp_skip)
-				m->bp_skip = 0;
-			else {
-				m->stop_reason = R58_STOP_BREAK;
-				m->stop_addr = pc;
-				m->bp_skip = 1;
-				return R58_STOP_BREAK;
-			}
+		/* a run resumed at a breakpoint executes that instruction; the
+		 * skip is for the first instruction only (not for the next hit
+		 * elsewhere, nor after the PC was moved) */
+		if (m->bp[pc] && !m->cpu.halted &&
+		    !(m->bp_skip && pc == m->stop_addr)) {
+			m->stop_reason = R58_STOP_BREAK;
+			m->stop_addr = pc;
+			m->bp_skip = 1;
+			return R58_STOP_BREAK;
 		}
+		m->bp_skip = 0;
 		m->trace[m->trace_pos++ % R58_TRACE] = pc;
 
 		m->cpu.int_line = daisy_int_line(&m->irq);

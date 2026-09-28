@@ -129,6 +129,23 @@ r58api_cpu(r58 *m, uint32_t *o)
 	o[16] = z->halted;
 }
 
+/* set one register, index as in r58api_cpu (0 af .. 7 pc) */
+void
+r58api_set_cpu(r58 *m, int idx, uint32_t v)
+{
+	z80 *z = &m->cpu;
+	switch (idx) {
+	case 0: z->a = v >> 8; z->f = v; break;
+	case 1: z->b = v >> 8; z->c = v; break;
+	case 2: z->d = v >> 8; z->e = v; break;
+	case 3: z->h = v >> 8; z->l = v; break;
+	case 4: z->ix = v; break;
+	case 5: z->iy = v; break;
+	case 6: z->sp = v; break;
+	case 7: z->pc = v; z->halted = 0; break;
+	}
+}
+
 unsigned long long r58api_instructions(r58 *m) { return m->instructions; }
 
 int
