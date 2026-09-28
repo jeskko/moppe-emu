@@ -79,6 +79,9 @@ def lib():
             "r58api_audio_capture": (None, [vp, C.c_uint]),
             "r58api_set_m1_wait": (None, [vp, C.c_int]),
             "r58api_step": (None, [vp, C.c_int]),
+            "r58api_io_write": (None, [vp, C.c_int, C.c_int]),
+            "r58api_io_read": (C.c_int, [vp, C.c_int]),
+            "r58api_load_rom1": (C.c_int, [vp, C.c_char_p]),
             "r58api_audio_take": (C.c_uint, [vp, C.POINTER(C.c_uint64),
                                               C.c_char_p, C.c_uint]),
         }
@@ -137,6 +140,18 @@ class Radio:
         rc = self.L.r58api_run(self.m, seconds)
         self._drain()
         return STOP[rc]
+
+    def io_write(self, port, v):
+        """OUT to a port, as the CPU would."""
+        self.L.r58api_io_write(self.m, port, v)
+
+    def io_read(self, port):
+        return self.L.r58api_io_read(self.m, port)
+
+    def load_rom1(self, path):
+        """Put an EPROM in the second socket (replaces the multiboard)."""
+        if self.L.r58api_load_rom1(self.m, path.encode()):
+            raise OSError(path)
 
     def step(self, n=1):
         """Execute n instructions."""

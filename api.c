@@ -190,3 +190,7 @@ r58api_audio_take(r58 *m, uint64_t *t, uint8_t *v, unsigned max)
 double r58api_xtal(void) { return R58_XTAL_HZ; }
 void r58api_set_m1_wait(r58 *m, int w) { m->m1_wait = w; }
 void r58api_step(r58 *m, int n) { while (n-- > 0) r58_step(m); }
+
+/* direct port access (tests, experiments): as if the CPU did OUT/IN */
+void r58api_io_write(r58 *m, int port, int v) { m->cpu.out(m, (uint16_t)port, (uint8_t)v); }
+int  r58api_io_read(r58 *m, int port) { return m->cpu.in(m, (uint16_t)port); }
