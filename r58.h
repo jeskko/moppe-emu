@@ -188,6 +188,7 @@ void r58_step(r58 *m);			/* one instruction */
 void r58_set_adc(r58 *m, int ch, uint8_t v);
 void r58_set_ptt(r58 *m, int pressed);
 void r58_set_local(r58 *m, int grounded);
+void r58_set_ign(r58 *m, int on);
 void r58_set_hook(r58 *m, int offhook);
 void r58_set_ccir(r58 *m, int nibble);
 void r58_set_multiboard(r58 *m, uint8_t v);

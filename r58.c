@@ -738,6 +738,15 @@ r58_set_local(r58 *m, int grounded)
 	update_lines(m);
 }
 
+/* /IGN (PB2 = EXIN2): grounded while the ignition is on; open (1) starts
+ * the firmware's auto power-off hour count (once_per_hour). */
+void
+r58_set_ign(r58 *m, int on)
+{
+	m->exin2 = !on;
+	update_lines(m);
+}
+
 void
 r58_set_hook(r58 *m, int offhook)
 {

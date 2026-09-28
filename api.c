@@ -29,6 +29,7 @@ void r58api_set_adc(r58 *m, int ch, int v) { r58_set_adc(m, ch, (uint8_t)v); }
 void r58api_set_ptt(r58 *m, int v) { r58_set_ptt(m, v); }
 void r58api_set_local(r58 *m, int v) { r58_set_local(m, v); }
 void r58api_set_hook(r58 *m, int v) { r58_set_hook(m, v); }
+void r58api_set_ign(r58 *m, int v) { r58_set_ign(m, v); }
 void r58api_set_ccir(r58 *m, int v) { r58_set_ccir(m, v); }
 void r58api_set_multiboard(r58 *m, int v) { r58_set_multiboard(m, (uint8_t)v); }
 int  r58api_key(r58 *m, int k) { return r58_key(m, k); }

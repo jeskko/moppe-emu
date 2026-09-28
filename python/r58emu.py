@@ -50,6 +50,7 @@ def lib():
             "r58api_set_adc": (None, [vp, C.c_int, C.c_int]),
             "r58api_set_ptt": (None, [vp, C.c_int]),
             "r58api_set_local": (None, [vp, C.c_int]),
+            "r58api_set_ign": (None, [vp, C.c_int]),
             "r58api_set_hook": (None, [vp, C.c_int]),
             "r58api_set_ccir": (None, [vp, C.c_int]),
             "r58api_set_multiboard": (None, [vp, C.c_int]),
@@ -282,6 +283,11 @@ class Radio:
 
     def local(self, on):
         self.L.r58api_set_local(self.m, 1 if on else 0)
+
+    def ign(self, on):
+        """/IGN (PB2): on = grounded (ignition on, the power-on default);
+        off starts the auto power-off count (cfg_ign_apo_hours)."""
+        self.L.r58api_set_ign(self.m, 1 if on else 0)
 
     def hook(self, offhook):
         self.L.r58api_set_hook(self.m, 1 if offhook else 0)
