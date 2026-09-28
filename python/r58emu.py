@@ -2,7 +2,7 @@
 Python harness for the R58 emulator (libr58.so via ctypes).
 
     from r58emu import Radio
-    r = Radio("firmware/build/r58.bin", listing="firmware/build/r58.lst")
+    r = Radio("firmware/build/r58.bin", listing="firmware/build/r58.map")
     r.run(2.0)
     print(r.display())
     r.type("433500#")
@@ -94,20 +94,68 @@ def lib():
 
 
 def load_symbols(listing):
-    """Symbol table from an as80 listing: {name: value}."""
+    """Symbol table {name: value} from the sdldz80 map (firmware/build/r58.map)
+    or an as80 listing.  A .lst without an as80 symbol table (an sdas
+    listing) is read through the .map next to it."""
+    if not listing.endswith(".map"):
+        syms = _as80_symbols(listing)
+        if syms:
+            return syms
+        listing = listing[:-4] + ".map"
+    return _map_symbols(listing)
+
+
+def _as80_symbols(listing):
     syms = {}
-    rx = re.compile(r"^# (\S+)\s+([a-z])\s+0x([0-9A-F]{4})\s")
+    rx = re.compile(r"^# (\S+)\s+([a-z])\s+0x([0-9A-F]{4})\s+\d+\s+(\d+)")
     with open(listing, errors="replace") as f:
         for line in f:
             m = rx.match(line)
             if m:
                 syms[m.group(1)] = int(m.group(3), 16)
+                SIZES.setdefault(listing, {})[m.group(1)] = int(m.group(4))
                 if m.group(2) == "l":
                     LABELS.setdefault(listing, set()).add(m.group(1))
     return syms
 
 
+def _map_symbols(path):
+    """Globals from the linker map.  The assembler's labels are absolute
+    symbols there (tools/asmpp.py), so which of them are labels comes from
+    the .labels file written next to the map; symbols of relocatable areas
+    (C code and data) are labels too."""
+    syms, labels = {}, set()
+    area = None
+    rx_area = re.compile(r"^Area\s")
+    rx_name = re.compile(r"^(\S+)\s+[0-9A-F]{8}\s+[0-9A-F]{8} =")
+    rx_sym = re.compile(r"^\s+([0-9A-F]{8})\s+(\S+)")
+    with open(path, errors="replace") as f:
+        for line in f:
+            m = rx_name.match(line.replace(".  .ABS.", ".ABS."))
+            if m:
+                area = m.group(1)
+                continue
+            m = rx_sym.match(line)
+            if m and not m.group(2).startswith((".__.", "s_", "l_")):
+                syms[m.group(2)] = int(m.group(1), 16)
+                if area not in (None, ".ABS."):
+                    labels.add(m.group(2))
+    lab = path[:-4] + ".labels"
+    if os.path.exists(lab):
+        labels |= {n.strip() for n in open(lab) if n.strip() in syms}
+    LABELS[path] = labels
+    # size of a label: distance to the next label (as80 gave the size of
+    # the defining statement, which is the same for data declarations)
+    order = sorted((syms[n], n) for n in labels)
+    sizes = {}
+    for (a, n), (b, _) in zip(order, order[1:] + order[-1:]):
+        sizes[n] = b - a
+    SIZES[path] = sizes
+    return syms
+
+
 LABELS = {}
+SIZES = {}
 
 
 class Radio:
@@ -125,7 +173,9 @@ class Radio:
         if self.L.r58api_load_rom(self.m, rom.encode()):
             raise OSError("cannot load ROM %s" % rom)
         self.sym = load_symbols(listing) if listing else {}
-        self.labels = LABELS.get(listing, set())
+        key = listing if listing in LABELS or not listing else listing[:-4] + ".map"
+        self.labels = LABELS.get(key, set())
+        self.sizes = SIZES.get(key, {})
         if nv is not None:
             self.set_nv(nv)
         self.events = []

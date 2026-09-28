@@ -231,7 +231,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", default=os.path.join(ROOT, "firmware/build/r58.bin"))
-    ap.add_argument("--lst", default=os.path.join(ROOT, "firmware/build/r58.lst"))
+    ap.add_argument("--lst", default=os.path.join(ROOT, "firmware/build/r58.map"))
     ap.add_argument("--cu", choices=["cu53", "cu58"], default="cu53")
     ap.add_argument("--card", choices=["p8e", "p8n"], default="p8e")
     ap.add_argument("--nv", help="NV (battery RAM) image to load/save")
