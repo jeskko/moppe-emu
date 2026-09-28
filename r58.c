@@ -84,26 +84,25 @@ ram_ptr(r58 *m, uint16_t a)
 }
 
 /*
- * 0x8000-0xBFFF.  P8E decode (schematic 3C 305838, IC5/IC10-12):
- * RS=1 selects EPROM0 with its A14,A15 = 1,1 (the 27C512's top 16 KB);
- * RS=0 selects EPROM1 with A14..A16 = OUT2 bits 0, 1, 3.  The DTMF/CTCSS
+ * 0x8000-0xBFFF, both cards: RS=1 selects EPROM0 chip 0x8000 (RA14=0) or
+ * 0xC000 (RA14=1) page; RS=0 selects EPROM1.  P8N: service manual p87-90;
+ * P8E: schematic, EPROM0 A14 = (A15 | A14) & (!A15 | RA14) through
+ * IC11/3, IC11/4, IC12/2 and IC10/4, i.e. RA14 in the window (traced by
+ * the user 2026-09-28; an earlier reading had A14 forced high).  EPROM1
+ * page: P8N RA15:RA14, P8E A14..A16 = OUT2 bits 0, 1, 3.  The DTMF/CTCSS
  * "multiboard" plugs into the EPROM1 socket; without an EPROM1 image the
  * socket reads as the multiboard status byte.
  */
 static uint8_t
 window_read(r58 *m, uint16_t a)
 {
-	/* P8N (service manual p87-90): RS=1 selects EPROM0 page 0x8000 or
-	 * 0xC000 by RA14; RS=0 EPROM1 page RA15:RA14 */
+	if (m->out2 & O2_RS)
+		return m->rom[0x8000 + ((m->out2 & O2_RA14) ? 0x4000 : 0) + (a & 0x3fff)];
 	if (m->card == R58_P8N) {
-		if (m->out2 & O2_RS)
-			return m->rom[0x8000 + ((m->out2 & O2_RA14) ? 0x4000 : 0) + (a & 0x3fff)];
 		if (m->rom1)
 			return m->rom1[(m->out2 & 3) * 0x4000 + (a & 0x3fff)];
 		return m->multiboard;
 	}
-	if (m->out2 & O2_RS)
-		return m->rom[0xC000 | (a & 0x3fff)];
 	if (m->rom1) {
 		unsigned bank = (m->out2 & (O2_RA14 | O2_RA15)) | ((m->out2 >> 1) & 4);
 		return m->rom1[bank * 0x4000 + (a & 0x3fff)];
