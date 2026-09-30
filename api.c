@@ -113,6 +113,7 @@ void
 r58api_pit(r58 *m, int n, uint32_t *o)
 {
 	pit_counter *c = &m->pit.c[n & 3];
+	r58_pit_sync(m);
 	o[0] = c->mode; o[1] = c->cr; o[2] = c->out; o[3] = c->null;
 }
 

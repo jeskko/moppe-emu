@@ -364,6 +364,7 @@ modem_write(r58 *m, int reg, uint8_t v)
 /* ---------------------------------------------------------------- I/O */
 
 static void pit_out(void *ctx, int counter, int level, unsigned off);
+static void pit01_sync(r58 *m);
 
 static uint8_t
 io_read(void *ctx, uint16_t port)
@@ -385,6 +386,7 @@ io_read(void *ctx, uint16_t port)
 		default: return sio_read_ctrl(&m->sio, 1);
 		}
 	case P_TMR:
+		pit01_sync(m);
 		return pit_read(&m->pit, reg);
 	case P_AD:
 		return m->adc_result;
@@ -418,6 +420,7 @@ io_write(void *ctx, uint16_t port, uint8_t v)
 		}
 		break;
 	case P_TMR:
+		pit01_sync(m);
 		pit_write(&m->pit, reg, v);
 		break;
 	case P_DA0:
@@ -568,6 +571,32 @@ serial_tick(r58 *m)
 
 /* ---------------------------------------------------------------- timers */
 
+/* Counters 0 and 1 (CLK 4.032 MHz) are clocked lazily: advance() adds
+ * their clocks to pit01_pending, and they are given to the 8254 when
+ * something looks at it (a port access, r58_pit_sync, audio capture),
+ * which is then in the same state as if clocked every instruction.
+ * Only counter 1's edges are wanted, and only while audio is captured:
+ * then it is clocked every instruction for their timestamps. */
+static void
+pit01_sync(r58 *m)
+{
+	uint64_t n = m->pit01_pending;
+
+	m->pit01_pending = 0;
+	while (n) {
+		unsigned k = n > 0x40000000u ? 0x40000000u : (unsigned)n;
+		pit_clock(&m->pit, 0, k);
+		pit_clock(&m->pit, 1, k);
+		n -= k;
+	}
+}
+
+void
+r58_pit_sync(r58 *m)
+{
+	pit01_sync(m);
+}
+
 static void
 pit_out(void *ctx, int counter, int level, unsigned off)
 {
@@ -585,6 +614,7 @@ pit_out(void *ctx, int counter, int level, unsigned off)
 void
 r58_audio_capture(r58 *m, unsigned capacity)
 {
+	pit01_sync(m);			/* edges before the capture: none */
 	free(m->aud_t);
 	free(m->aud_v);
 	m->aud_t = 0;
@@ -597,6 +627,7 @@ r58_audio_capture(r58 *m, unsigned capacity)
 		if (m->aud_t && m->aud_v)
 			m->aud_cap = capacity;
 	}
+	m->pit.quiet = m->aud_cap ? 1u : 3u;	/* counter 0 never watched */
 }
 
 unsigned
@@ -684,6 +715,7 @@ r58_init(r58 *m, int card, int cu)
 	}
 	m->pit.out_changed = pit_out;
 	m->pit.ctx = m;
+	m->pit.quiet = 3;			/* no audio capture */
 	pit_init(&m->pit);
 	cu53an_init(&m->cu53);
 	cu58af_init(&m->cu58);
@@ -822,10 +854,13 @@ advance(r58 *m, uint64_t dt)
 	m->pit01_rem += dt;
 	unsigned clocks = (unsigned)(m->pit01_rem >> 1);
 	m->pit01_rem &= 1;
-	if (clocks) {
-		pit_clock(&m->pit, 0, clocks);
-		pit_clock(&m->pit, 1, clocks);
-	}
+	if (m->aud_cap) {
+		if (clocks) {
+			pit_clock(&m->pit, 0, clocks);
+			pit_clock(&m->pit, 1, clocks);
+		}
+	} else
+		m->pit01_pending += clocks;
 	m->now += dt;
 }
 

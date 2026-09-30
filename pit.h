@@ -36,6 +36,10 @@ typedef struct pit {
 	 * the pit_clock() call (0 = first clock of the batch) */
 	void (*out_changed)(void *ctx, int counter, int level, unsigned offset);
 	void  *ctx;
+	/* bit n: nobody watches counter n's edges: no callback, and
+	 * pit_clock skips whole mode 2/3 periods (the state after a period
+	 * is the state before it) */
+	unsigned quiet;
 } pit;
 
 void    pit_init(pit *p);

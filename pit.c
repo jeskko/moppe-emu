@@ -7,10 +7,12 @@ pit_init(pit *p)
 {
 	void (*cb)(void *, int, int, unsigned) = p->out_changed;
 	void *ctx = p->ctx;
+	unsigned quiet = p->quiet;
 
 	memset(p, 0, sizeof(*p));
 	p->out_changed = cb;
 	p->ctx = ctx;
+	p->quiet = quiet;
 	for (int i = 0; i < 3; i++) {
 		p->c[i].out = 1;	/* undefined at power-up; high is typical */
 		p->c[i].null = 1;
@@ -25,7 +27,7 @@ set_out(pit *p, int n, int level, unsigned off)
 	if (c->out == level)
 		return;
 	c->out = level;
-	if (p->out_changed)
+	if (p->out_changed && !(p->quiet & (1u << n)))
 		p->out_changed(p->ctx, n, level, off);
 }
 
@@ -234,6 +236,15 @@ pit_clock(pit *p, int n, unsigned nclocks)
 			continue;
 		case 2:
 			cur = c->ce ? c->ce : 0x10000;
+			/* unwatched: whole periods (from a CE within one; a CE
+			 * from an older count first counts down normally) */
+			if ((p->quiet & (1u << n)) && c->cr != 1) {
+				uint32_t per = eff_count(c);
+				if (cur <= per && left > per) {
+					off += (left - 1) / per * per;
+					left = nclocks - off;
+				}
+			}
 			if (cur > 1) {
 				uint32_t k = cur - 1;		/* clocks until CE == 1 */
 				if (k > left) {
@@ -251,6 +262,16 @@ pit_clock(pit *p, int n, unsigned nclocks)
 			set_out(p, n, 1, off - 1);
 			continue;
 		case 3:
+			/* unwatched: whole periods, when the half in progress is
+			 * no longer than the current count's (a new count takes
+			 * effect at the next half) */
+			if ((p->quiet & (1u << n)) && c->cr != 1) {
+				uint32_t per = eff_count(c);
+				if (c->sq_left <= (c->out ? (per + 1) / 2 : per / 2) && left > per) {
+					off += (left - 1) / per * per;
+					left = nclocks - off;
+				}
+			}
 			if (c->sq_left > left) {
 				c->sq_left -= left;
 				c->ce = (c->sq_left * 2) & 0xffff;

@@ -125,6 +125,8 @@ typedef struct r58 {
 	/* time */
 	uint64_t now;			/* xt */
 	uint64_t pit01_rem;		/* xt carry for CLK0/1 (div 2) */
+	uint64_t pit01_pending;		/* CLK0/1 clocks not yet given to the
+					 * 8254 (r58.c pit01_sync) */
 	uint64_t cpu_cycles;		/* T-states including waits */
 	uint64_t instructions;
 
@@ -183,6 +185,7 @@ void r58_reset(r58 *m);			/* hardware reset (power-up) */
 int  r58_run(r58 *m, double seconds);
 double r58_time(const r58 *m);
 void r58_step(r58 *m);			/* one instruction */
+void r58_pit_sync(r58 *m);		/* lazy 8254 counters 0/1 up to now */
 
 /* inputs */
 void r58_set_adc(r58 *m, int ch, uint8_t v);
