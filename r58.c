@@ -685,7 +685,7 @@ r58_init(r58 *m, int card, int cu)
 	m->cu = cu;
 	m->wd_timeout_s = 0.52;	/* 74HC4040 at 1968.75 Hz (service manual p86) */
 	m->m1_wait = card == R58_P8E ? 1 : 0;
-	m->hook_offhook_level = 0;
+	m->hook_offhook_level = 1;	/* assumed: PA1 = 1 lifted (notes) */
 	m->power_on = 1;
 	m->powered = 1;
 	m->ccir_nibble = 0x0f;

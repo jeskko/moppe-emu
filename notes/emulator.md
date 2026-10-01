@@ -38,7 +38,7 @@ including an operator on the released firmware.
 | Item | Assumption | Source of uncertainty |
 |---|---|---|
 | Watchdog timeout | 0.52 s (`wd_timeout_s`), from the P8N manual; LOCAL disabling it is not modelled | P8E not documented |
-| Hook polarity (PA1) | 1 = on cradle (`hook_offhook_level = 0`) | firmware comments disagree |
+| Hook polarity (PA1) | 1 = lifted (`hook_offhook_level = 1`, since 2026-10-01; was 1 = on cradle) | assumed, not measured: the handset connector gives HK = 0 in the holder (R58 service manuals), the P8N block diagram labels PIO A1 "_HK", v3_Z's hook interrupt and OH5NXO's R58bis (`iomap_P8x.h:91`) read 1 as lifted; v3_Z's repeater-sitter check read the opposite (fixed in the firmware). Flip the default back if a real radio disagrees |
 | Daisy chain | PIO before SIO | manual + P8E block diagram |
 | FX429 IRQ | edge on SIO A DCD per event (shared with hook change, per manual) | 8254 OUT2 on DCDA not modelled |
 | FX429 modem | byte level only: TX bytes logged as events, RX packets injected with `modem_rx()` | no bit-level FFSK audio |
