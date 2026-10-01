@@ -4,8 +4,9 @@ CFLAGS  += -Wall -Wextra -fPIC
 OBJS     = z80.o daisy.o pio.o sio.o pit.o cu53an.o cu58af.o r58.o
 MD5X_OBJS = cdp1802.o pit.o cu53an.o md5x.o
 MC25_OBJS = cdp1802.o cu41.o mc25.o
+TMX1_OBJS = upd7810.o pit.o tmx1hs.o tmx1.o
 
-all: r58emu libr58.so libmd5x.so libmc25.so
+all: r58emu libr58.so libmd5x.so libmc25.so libtmx1.so
 
 r58emu: main.o $(OBJS)
 	$(CC) $(CFLAGS) -o $@ main.o $(OBJS)
@@ -19,12 +20,16 @@ libmd5x.so: $(MD5X_OBJS) md5x_api.o
 libmc25.so: $(MC25_OBJS) mc25_api.o
 	$(CC) -shared -o $@ $(MC25_OBJS) mc25_api.o
 
+libtmx1.so: $(TMX1_OBJS) tmx1_api.o
+	$(CC) -shared -o $@ $(TMX1_OBJS) tmx1_api.o
+
 %.o: %.c *.h
 	$(CC) $(CFLAGS) -c $<
 
-test: r58emu tests/unit/test_pit tests/unit/test_cdp1802
+test: r58emu tests/unit/test_pit tests/unit/test_cdp1802 tests/unit/test_upd7810
 	./tests/unit/test_pit
 	./tests/unit/test_cdp1802
+	./tests/unit/test_upd7810
 
 tests/unit/test_pit: tests/unit/test_pit.c pit.c pit.h
 	$(CC) $(CFLAGS) -o $@ tests/unit/test_pit.c pit.c
@@ -32,11 +37,17 @@ tests/unit/test_pit: tests/unit/test_pit.c pit.c pit.h
 tests/unit/test_cdp1802: tests/unit/test_cdp1802.c cdp1802.c cdp1802.h
 	$(CC) $(CFLAGS) -o $@ tests/unit/test_cdp1802.c cdp1802.c
 
+tests/unit/test_upd7810: tests/unit/test_upd7810.c upd7810.c upd7810.h
+	$(CC) $(CFLAGS) -o $@ tests/unit/test_upd7810.c upd7810.c
+
 test-md5x: libmd5x.so
 	python3 -m unittest discover -s tests/md5x
 
 test-mc25: libmc25.so
 	python3 -m unittest discover -s tests/mc25
+
+test-tmx1: libtmx1.so
+	python3 -m unittest discover -s tests/tmx1
 
 zex: tests/zex/cpm
 	./tests/zex/cpm tests/zex/zexdoc.com
@@ -45,6 +56,6 @@ tests/zex/cpm: tests/zex/cpm.c z80.c z80.h
 	$(CC) -O2 -o $@ tests/zex/cpm.c z80.c
 
 clean:
-	rm -f *.o r58emu libr58.so libmd5x.so libmc25.so tests/unit/test_pit tests/unit/test_cdp1802 tests/zex/cpm
+	rm -f *.o r58emu libr58.so libmd5x.so libmc25.so libtmx1.so tests/unit/test_pit tests/unit/test_cdp1802 tests/unit/test_upd7810 tests/zex/cpm
 
-.PHONY: all test test-md5x test-mc25 zex clean
+.PHONY: all test test-md5x test-mc25 test-tmx1 zex clean
