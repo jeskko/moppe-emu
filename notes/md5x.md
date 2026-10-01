@@ -12,7 +12,7 @@ Hardware facts and sources are in the firmware repo's `notes/md5x.md`.
 | CPU | `cdp1802.c` | CDP1802, and CDP1806 (MD59/ME59): all 68xx instructions, counter/timer (timer, event and pulse modes, ETQ, CIL/CIE/XIE), BCD. Instruction-stepped, machine cycles exact (2, long branches/skips 3, 68xx 3-10; interrupt entry 1, IDL 1 per cycle). Unit test `tests/unit/test_cdp1802.c` (hand-assembled programs). |
 | Board | `md5x.c` | Memory maps, N0/N1/N2 I/O decode, eight 4-bit output latches (OUT 4, latch from R(X) bits 3..1), 4021 input chain (Q clock, PSC load, /EF3), MAS7205 modem at register level, serial synth capture, watchdog, OFF1 power-off, ME59 ADC/DAC/8253, MD50 WAIT (N0) |
 | Handset | `cu53an.c` | Same chain/LCD protocol as the R58 CU53AN; parallel-load bit 1 (`bit1`) is the Talkman D5 key bit, idle 1 on CU53, 0 on CU59 |
-| API | `md5x_api.c` → `libmd5x.so`; `python/md5xemu.py` | `Radio(rom, listing, model, cu)`; as06 listing symbols; LCD text decoded with the ROM's own `font` table |
+| API | `md5x_api.c` → `libmd5x.so`; `python/md5xemu.py`; `python/md5xtui.py` (curses, or `--script` headless) | `Radio(rom, listing, model, cu)`; as06 listing symbols; LCD text decoded with the ROM's own `font` table |
 | Tests | `tests/md5x/` | `roms.py` builds six firmware images from the reference sources with as06; `test_md5x.py` (13 scenarios). Skip if the sources or a 32-bit runtime are missing |
 
 Time is in CPU clock periods (3.6864 MHz MD5x, 4.8 MHz ME59); peripherals
@@ -63,4 +63,4 @@ advance after each instruction.
 | 8253 GATE1 (inverted OUT0), OH1E's 455 kHz AFC measurement | gate not modelled |
 | Tone outputs | only one latch bit captured at a time (`audio_capture(bit=)`, default PHI); OH1E's CTCSS DAC in the PROM socket not modelled |
 | Watchdog OFF3 | not modelled |
-| Handset | no TUI yet; keys by label (`KEYS`), Finnish layout |
+| Handset | keys by label (`KEYS`), Finnish layout only |

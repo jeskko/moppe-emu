@@ -22,7 +22,7 @@ submodule.
 | R58 board | `r58.c`: P8E/P8N memory maps incl. the banked ROM window, I/O, ADC/DACs, latches, watchdog, power, FX429 modem at byte level, synthesizer capture, tone pin edges, breakpoints and watchpoints |
 | API | `api.c` flat C API (`libr58.so`); `python/r58emu.py` ctypes harness (`Radio`); `python/r58tui.py` terminal UI; `python/afsk.py` AX.25 decoder |
 | CDP1802 core | `cdp1802.c`: CDP1802 and CDP1806 (68xx instructions, counter/timer), exact machine cycles. Unit test, no exerciser |
-| Talkman board | `md5x.c`: MD50/MD59/ME59 memory maps, output latches, 4021 inputs, MAS7205 modem (100 Hz timer interrupt), synth capture, watchdog, ME59 ADC/DAC/8253; `md5x_api.c` (`libmd5x.so`), `python/md5xemu.py`. Boots OH3NWQ mx5x v3.183 and OH1E #42 on all three models: [notes/md5x.md](notes/md5x.md) |
+| Talkman board | `md5x.c`: MD50/MD59/ME59 memory maps, output latches, 4021 inputs, MAS7205 modem (100 Hz timer interrupt), synth capture, watchdog, ME59 ADC/DAC/8253; `md5x_api.c` (`libmd5x.so`), `python/md5xemu.py` harness, `python/md5xtui.py` terminal UI. Boots OH3NWQ mx5x v3.183 and OH1E #42 on all three models: [notes/md5x.md](notes/md5x.md) |
 
 Design, timing model and fidelity evidence: [notes/emulator.md](notes/emulator.md).
 
@@ -64,6 +64,13 @@ r.run(2.5); r.type("33500"); r.run(0.5)
 print(r.display(), r.rx_hz())      # ('30    ', '20  433500') 433500000.0
 ```
 
+Or interactively (builds the firmware from the reference sources):
+
+```sh
+python3 python/md5xtui.py --fw mx5x-md59 --ram my.ram
+python3 python/md5xtui.py --fw oh1e-me59 --script '196500#.'   # headless
+```
+
 ## Layout
 
 | Path | What |
@@ -75,7 +82,7 @@ print(r.display(), r.rx_hz())      # ('30    ', '20  433500') 433500000.0
 | `r58.c` | R58 board |
 | `md5x.c`, `md5x_api.c` | Talkman MD50/MD59/ME59 board, its flat API |
 | `api.c`, `main.c` | Flat API, CLI smoke run (`r58emu`) |
-| `python/` | Harnesses (`r58emu.py`, `md5xemu.py`), TUI, AFSK decoder |
+| `python/` | Harnesses (`r58emu.py`, `md5xemu.py`), TUIs (`r58tui.py`, `md5xtui.py`), AFSK decoder |
 | `tests/unit/`, `tests/zex/` | 8254 and CDP1802 unit tests, CP/M harness for zexdoc/zexall |
 | `tests/md5x/` | Talkman firmware builder (`roms.py`) and scenarios |
 | `notes/` | Design notes |

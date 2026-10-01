@@ -40,8 +40,17 @@ KEYS = {
 UPPER = [32, 36, 40, 44, 48, 52]                    # u5 .. u0
 LOWER = [56, 60, 0, 4, 8, 12, 16, 20, 24, 28]       # dl1 dl0 dr7 .. dr0
 
-# mx5x font (bit 0..6 per glyph position); used when the ROM has no 'font'
-_FONT_CHARS = "0123456789AbCdEFGHIJKLMNOPQRSTUVWXYZ- "
+# icon segments (mx5x.asm SEG_* defines; OH1E's ICO* agree)
+ICONS = {
+    "CU53": {127: "KEY", 123: "T", 67: "C", 103: "COLON_L", 71: "COLON_R",
+             79: "BAR_L", 91: "BAR_R", 115: "S", 119: "F", 75: "D", 83: "I",
+             87: "LESS", 95: "N"},
+    "CU59": {111: "ARROW", 127: "KEY", 123: "r", 107: "s", 67: "t",
+             103: "HANDSET", 71: "COLON_R", 79: "CH", 91: "A", 115: "D",
+             119: "I", 75: "LESS", 83: "S", 87: "F", 95: "N"},
+}
+# handset indicator latch bits (mx5x BIT_*, OH1E LED_*)
+LEDS = ["AVAIL", "CALL", "SERV", "KEYLIGHT", "ROAM", "HF", "LCDLIGHT", "BRIGHT"]
 
 _lib = None
 
@@ -318,12 +327,27 @@ class Radio:
             g |= ((segs[p >> 3] >> (p & 7)) & 1) << (4 + i)
         return g
 
+    def glyphs(self):
+        """Raw 7-segment glyphs (upper 6, lower 10); bit 0 f, 1 e, 2 c,
+        3 b, 4 a, 5 g, 6 d (the CU53AN encoding)."""
+        segs = self.segments()
+        return ([self._glyph(segs, b) for b in UPPER],
+                [self._glyph(segs, b) for b in LOWER])
+
     def display(self):
         """(upper 6 chars, lower 10 chars) decoded with the ROM font."""
+        up, lo = self.glyphs()
+        return ("".join(self._font.get(g, "?") for g in up),
+                "".join(self._font.get(g, "?") for g in lo))
+
+    def icons(self):
+        """Names of the lit icon segments."""
         segs = self.segments()
-        up = "".join(self._font.get(self._glyph(segs, b), "?") for b in UPPER)
-        lo = "".join(self._font.get(self._glyph(segs, b), "?") for b in LOWER)
-        return up, lo
+        return {n for p, n in ICONS[self.cu].items() if segs[p >> 3] >> (p & 7) & 1}
+
+    def led_names(self):
+        v = self.leds()
+        return [n for i, n in enumerate(LEDS) if v >> i & 1]
 
     def synth(self):
         out = (C.c_uint * 10)()
@@ -357,9 +381,11 @@ class Radio:
         return [(t[i], v.raw[i]) for i in range(n)]
 
     def tone_hz(self, t0=None, t1=None):
-        """Mean frequency of the captured edge train (two edges a cycle)."""
+        """Tone frequency of the captured edge train, from the median
+        half period (robust to gaps between bursts); 0 if no tone."""
         e = [t for t, _ in self.audio_edges()
              if (t0 is None or t >= t0) and (t1 is None or t <= t1)]
         if len(e) < 3:
             return 0.0
-        return (len(e) - 1) / 2.0 / (e[-1] - e[0])
+        d = sorted(b - a for a, b in zip(e, e[1:]))
+        return 1.0 / (2.0 * d[len(d) // 2])
