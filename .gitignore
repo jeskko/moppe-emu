@@ -1,0 +1,6 @@
+*.o
+r58emu
+libr58.so
+tests/unit/test_pit
+tests/zex/cpm
+__pycache__/
