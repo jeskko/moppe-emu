@@ -519,7 +519,7 @@ periodic(tmx1 *m)
 		upd7810_nmi(&m->cpu);
 		ev(m, TMX1_EV_WDNMI, m->cpu.pc);
 	}
-	if (since > (uint64_t)(m->wd_off_s * TMX1_HZ))
+	if (since > (uint64_t)((m->wd_nmi_s + m->wd_off_s) * TMX1_HZ))
 		power_off(m);
 	if (m->clk - m->pit_done12 * 12 >= 1024)
 		pit_sync(m);

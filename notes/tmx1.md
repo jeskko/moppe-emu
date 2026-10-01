@@ -14,7 +14,7 @@ sources: the firmware repo's `notes/tmx1.md`.
 | Radio | `tmx1.c` | NP5SA memory map and paging, serial bus (PLLs, DAC, LFU), 74259, MAS7825 at byte level, i8253 (`pit.c`), watchdog, power logic, the MBUS line, a passive MBUS monitor and a host MBUS transmitter |
 | Handset | `tmx1hs.c` | HSN-2: 74259 pair over the EPROM (keypad rails, LCD /CS and C/D, LEDs), PCD3312 on I2C; HSF-2: keypad rails on PA, HSIC registers 0400-0700; both: two uPD7228 LCD controllers, keypad edges on AN4-AN7, POWERSW, hook |
 | API | `tmx1_api.c` → `libtmx1.so`; `python/tmx1emu.py`; `python/upd7810dis.py` (as7810-syntax disassembler); `python/tmx1tui.py` | `Radio(rom, lst, hs_rom=, handset="HSN2"/"HSF2")`; `handset=None`: the host plays the handset over MBUS |
-| Tests | `tests/tmx1/` | `roms.py` builds the four images with as7810 from `tmx1_v50.zip`; `test_tmx1.py` (15 scenarios) |
+| Tests | `tests/tmx1/` | `roms.py` builds the four images with as7810 from `tmx1_v50.zip`; `test_tmx1.py` (16 scenarios) |
 
 Both units run at 11.0592 MHz. Time is radio clocks; the scheduler steps
 whichever CPU is behind, so the two stay within one instruction. The
@@ -43,7 +43,7 @@ its own transmissions.
 | MAS7825 | byte level: data writes are events, TFLAG back after 8/1200 s, TXE while sending, RFLAG on `modem_rx` | firmware `modem_*`; OH5NXO MAS.registers |
 | /PTT | PC2 (I2DA, 10k pull-up), low = pressed | firmware ("I2DA is our /PTT") |
 | A/D defaults | BATT 200 (13.8 V), TEMP 153 (+20 C), BTMP 128, TIMEOUT 255, others 0 | service manual 8-2 figures |
-| Watchdog | NMI 400 ms after the last WDC (PC6) rising edge, power off 12 s after it | service manual 8-6 |
+| Watchdog | NMI 400 ms after the last WDC (PC6) rising edge, power off 12 s after the NMI if no pulse came | service manual 8-6 |
 | Power | PWROFF (PC7) rising switches the unit (and the handset it feeds) off; the handset power key switches it on | service manual 8-6, firmware `do_quit` |
 | Handset clock | 11.0592 MHz | same MBUS timer settings as the radio |
 | uPD7228 | serial MSB first on SCK rising while /CS low; the first byte after /CS falls is the chip address (0 or 3); C/D = 1 command. Commands 0x64-0x6F write / OR / AND mode, 0x70-0x73 character mode, low 2 bits the pointer step (01 down, 10 up), 0x80+n data pointer, 0x08/09 display off/on. Character mode writes 5 columns and keeps bit 7 (the icon row) | inferred from hsn2.asm and hsf2.asm, which use opposite pointer directions; no data sheet |

@@ -218,6 +218,18 @@ class Radio_(unittest.TestCase):
         # systick is the only WDC pulse: 400 ms after the last one
         self.assertTrue(nmi[0][2] in (a + 1, a + 2))
 
+    def test_watchdog_power_off(self):
+        r = radio()
+        a = r.sym("mainloop")
+        r.poke(a, 0xBA)		# DI
+        r.poke(a + 1, 0xFF)	# JR .
+        r.poke(0x0004, 0xFF)	# NMI vector: JR . too, so it never recovers
+        r.run(13.0)
+        (t_nmi, _, _), = r.take_events("WDNMI")
+        (t_off, _, _), = r.take_events("POWEROFF")
+        self.assertAlmostEqual(t_off - t_nmi, 12.0, delta=0.01)
+        self.assertFalse(r.powered())
+
 
 if __name__ == "__main__":
     unittest.main()

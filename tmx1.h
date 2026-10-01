@@ -35,7 +35,7 @@ enum {
 
 enum {
 	TMX1_EV_WDNMI = 1,	/* watchdog: no WDC pulse for 400 ms */
-	TMX1_EV_POWEROFF,	/* PWROFF, or the watchdog's 12 s */
+	TMX1_EV_POWEROFF,	/* PWROFF, or the watchdog 12 s after its NMI */
 	TMX1_EV_POWERON,
 	TMX1_EV_TX_ON,		/* TXON (PB4) set */
 	TMX1_EV_TX_OFF,
@@ -106,7 +106,7 @@ typedef struct tmx1 {
 	uint8_t  *aud_v;
 	unsigned aud_n, aud_cap;
 
-	/* watchdog: NMI 400 ms after the last WDC pulse, power off at 12 s */
+	/* watchdog: NMI 400 ms after the last WDC pulse, power off 12 s after the NMI */
 	uint64_t wd_last;
 	int      wd_nmi_sent;
 	double   wd_nmi_s, wd_off_s;
