@@ -64,6 +64,8 @@ struct cdp1802 {
 	uint8_t (*ef)(void *ctx);
 	/* Q output changed; may be NULL */
 	void    (*qout)(void *ctx, int level);
+	/* interrupt entry (S3, acknowledge); may be NULL */
+	void    (*inta)(void *ctx);
 };
 
 /* /CLEAR: X, P, R0, Q = 0, IE = 1 (and XIE, CIE; counter stopped) */

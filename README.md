@@ -5,8 +5,9 @@ radios converted to ham use), for developing and testing their firmware
 without burning EPROMs.
 
 Supported today: the **R58 series** (RB58/RC58/RD58) on P8E and P8N
-processor cards with CU53AN or CU58AF handsets, and the **Talkman
-MD50/MD59/ME59** (CDP1802/1806) with CU53 or CU59 handsets.
+processor cards with CU53AN or CU58AF handsets, the **Talkman
+MD50/MD59/ME59** (CDP1802/1806) with CU53 or CU59 handsets, and the
+**MC25 TVL/PTL** (CDP1802) with its CU41 control unit.
 
 The firmware it was built for, and its scenario and differential tests,
 live in the firmware repo (`moppe`), which has this repo as the `emu/`
@@ -23,22 +24,24 @@ submodule.
 | API | `api.c` flat C API (`libr58.so`); `python/r58emu.py` ctypes harness (`Radio`); `python/r58tui.py` terminal UI; `python/afsk.py` AX.25 decoder |
 | CDP1802 core | `cdp1802.c`: CDP1802 and CDP1806 (68xx instructions, counter/timer), exact machine cycles. Unit test, no exerciser |
 | Talkman board | `md5x.c`: MD50/MD59/ME59 memory maps, output latches, 4021 inputs, MAS7205 modem (100 Hz timer interrupt), synth capture, watchdog, ME59 ADC/DAC/8253; `md5x_api.c` (`libmd5x.so`), `python/md5xemu.py` harness, `python/md5xtui.py` terminal UI. Boots OH3NWQ mx5x v3.183 and OH1E #42 on all three models: [notes/md5x.md](notes/md5x.md) |
+| MC25 board | `mc25.c`, `cu41.c`: KL1 ports, 1 ms interrupt, CU41 display and keypad, CCIR at digit level, soft-UART; `mc25_api.c` (`libmc25.so`), `python/mc25emu.py`, `python/mc25tui.py`. Runs OH5NXO/OH3NWQ mc25.asm v3.6: [notes/mc25.md](notes/mc25.md) |
 
 Design, timing model and fidelity evidence: [notes/emulator.md](notes/emulator.md).
 
 ## Build and test
 
 ```sh
-make            # r58emu, libr58.so, libmd5x.so
+make            # r58emu, libr58.so, libmd5x.so, libmc25.so
 make test       # 8254 and CDP1802 unit tests
 make test-md5x  # Talkman scenarios (needs the firmware repo's reference/md5x)
+make test-mc25  # MC25 scenarios (needs the firmware repo's reference/mc25ptl)
 make zex        # Z80 exerciser (zexdoc), ~75 s
 ```
 
 The R58 scenario tests need a firmware image and run from the firmware
-repo. The Talkman tests build their firmware from the third-party sources
-in the firmware repo's gitignored `reference/md5x/` (`MD5X_REF` to point
-elsewhere) with the 2008 i386 `as06` binary, so they need a 32-bit
+repo. The Talkman and MC25 tests build their firmware from the third-party
+sources in the firmware repo's gitignored `reference/md5x/` and
+`reference/mc25ptl/` (`MD5X_REF` / `MC25_REF` to point elsewhere) with the 2008 i386 `as06` binary, so they need a 32-bit
 runtime; they skip otherwise.
 
 Running a ROM:
@@ -69,6 +72,7 @@ Or interactively (builds the firmware from the reference sources):
 ```sh
 python3 python/md5xtui.py --fw mx5x-md59 --ram my.ram
 python3 python/md5xtui.py --fw oh1e-me59 --script '196500#.'   # headless
+python3 python/mc25tui.py --nv my-mc25.nv                       # MC25
 ```
 
 ## Layout
@@ -81,10 +85,11 @@ python3 python/md5xtui.py --fw oh1e-me59 --script '196500#.'   # headless
 | `cu53an.c`, `cu58af.c` | Handsets |
 | `r58.c` | R58 board |
 | `md5x.c`, `md5x_api.c` | Talkman MD50/MD59/ME59 board, its flat API |
+| `mc25.c`, `cu41.c`, `mc25_api.c` | MC25 TVL/PTL board, CU41 control unit, flat API |
 | `api.c`, `main.c` | Flat API, CLI smoke run (`r58emu`) |
-| `python/` | Harnesses (`r58emu.py`, `md5xemu.py`), TUIs (`r58tui.py`, `md5xtui.py`), AFSK decoder |
+| `python/` | Harnesses (`r58emu.py`, `md5xemu.py`, `mc25emu.py`), TUIs (`r58tui.py`, `md5xtui.py`, `mc25tui.py`), AFSK decoder |
 | `tests/unit/`, `tests/zex/` | 8254 and CDP1802 unit tests, CP/M harness for zexdoc/zexall |
-| `tests/md5x/` | Talkman firmware builder (`roms.py`) and scenarios |
+| `tests/md5x/`, `tests/mc25/` | Talkman and MC25 firmware builders (`roms.py`) and scenarios |
 | `notes/` | Design notes |
 
 Licence: MIT (`LICENSE`). `tests/zex/zex*.com` are Frank Cringle's Z80

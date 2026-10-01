@@ -468,6 +468,8 @@ cdp1802_step(cdp1802 *c)
 		c->ie = 0;
 		c->idle = 0;
 		cyc = 1;
+		if (c->inta)
+			c->inta(c->ctx);
 	} else if (c->idle) {
 		/* an interrupt request ends IDL even with IE = 0 */
 		if (int_pending(c))

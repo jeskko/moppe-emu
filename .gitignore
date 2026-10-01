@@ -7,3 +7,5 @@ __pycache__/
 libmd5x.so
 tests/unit/test_cdp1802
 tests/md5x/build/
+libmc25.so
+tests/mc25/build/
