@@ -30,7 +30,7 @@ submodule.
 | uPD7810 core | `upd7810.c`: uPD7810/78C10 instruction set with data-sheet state counts, timers, event counter, async serial, A/D, edge flags, interrupts. Unit test; decoder checked against as7810 on every instruction form |
 | TMx-1 | `tmx1.c` radio unit (PLLs, DAC, LFU, 8253, modem at byte level, watchdog, power), `tmx1hs.c` HSN-2 / HSF-2 handsets (uPD7228 LCDs, keypad, LEDs, DTMF), bit-level MBUS between the two CPUs; `tmx1_api.c` (`libtmx1.so`), `python/tmx1emu.py`, `python/tmx1tui.py`, `python/upd7810dis.py`. Runs OH5NXO/OH3NWQ tmx1.asm v5.0 with HSN-2 v1.6 / HSF-2 v0.2: [notes/tmx1.md](notes/tmx1.md) |
 
-Design, timing model and fidelity evidence: [notes/emulator.md](notes/emulator.md).
+Overview and conventions: [notes/emulator.md](notes/emulator.md); per radio (layers, timing model, fidelity evidence, limits): [r58](notes/r58.md), [md5x](notes/md5x.md), [mc25](notes/mc25.md), [tmx1](notes/tmx1.md).
 
 ## Build and test
 
