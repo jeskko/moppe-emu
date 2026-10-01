@@ -40,6 +40,8 @@ typedef struct cu53an {
 	/* keypad */
 	int      key;		/* raw code held, or CU53_KEY_NONE */
 	uint8_t  ldr_dark;	/* LDR input bit as loaded into the chain */
+	uint8_t  bit1;		/* parallel-load bit 1 (1 on the CU53AN; the
+				 * Talkman CU53/CU59 use it as an extra key bit) */
 	unsigned frames;	/* complete LCD loads, for change detection */
 } cu53an;
 

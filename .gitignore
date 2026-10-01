@@ -4,3 +4,6 @@ libr58.so
 tests/unit/test_pit
 tests/zex/cpm
 __pycache__/
+libmd5x.so
+tests/unit/test_cdp1802
+tests/md5x/build/

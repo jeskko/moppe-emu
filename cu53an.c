@@ -13,6 +13,7 @@ cu53an_init(cu53an *c)
 	memset(c, 0, sizeof(*c));
 	c->key = CU53_KEY_NONE;
 	c->sel = SEL_KEYPAD;
+	c->bit1 = 1;
 }
 
 static void
@@ -35,7 +36,8 @@ parallel_word(const cu53an *c)
 	/* encoder outputs are enabled only while DA is high; otherwise the
 	 * inputs float/pull high */
 	uint8_t code = c->key >= 0 ? (uint8_t)c->key : 0x1f;
-	return (uint8_t)((c->ldr_dark ? 0x80 : 0) | ((code & 0x1f) << 2) | 0x03);
+	return (uint8_t)((c->ldr_dark ? 0x80 : 0) | ((code & 0x1f) << 2) |
+	                 (c->bit1 ? 0x02 : 0) | 0x01);
 }
 
 void
