@@ -24,9 +24,10 @@ Shared chips: `pit.c` (Intel 8254 / 8253: R58, ME59, TMx-1), `pio.c`,
   breakpoints, watchpoints, a PC trace and symbol lookup from the
   firmware's listing or map. A curses TUI `python/<board>tui.py` with a
   headless `--script` mode sits on top.
-- Third-party test firmware is built from the firmware repo's gitignored
-  `reference/` by each board's `tests/<board>/roms.py` and is never
-  committed.
+- Third-party test firmware is built by each board's `tests/<board>/roms.py`
+  from a gitignored `reference/`: this repo's (`make refs` fetches it from
+  the authors' sites, README "Test firmware") or the firmware repo's. It
+  is never committed.
 
 ## Changing the emulator
 

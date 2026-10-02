@@ -5,7 +5,8 @@ HSN-2 v1.6 and HSF-2 v0.2 handset firmware, all from OH3NWQ's
 tmx1_v50.zip, with the as7810 assembler in the same zip (as its 'mak').
 
 The zip lives in the firmware repo's reference/md5x/oh3nwq-moppe/ (see
-its notes/tmx1.md); set TMX1_REF to the directory holding it.  as7810 is
+its notes/tmx1.md), or in this repo's reference/ after `make refs`; set
+TMX1_REF to the directory holding it.  as7810 is
 a 2000 i386 Linux binary that runs the system cpp, so a 32-bit runtime
 (/lib/ld-linux.so.2) and cpp are needed.
 
@@ -31,6 +32,7 @@ BUILDS = {
 
 def reference():
     cands = [os.environ.get("TMX1_REF"),
+             os.path.join(HERE, "..", "..", "reference", "md5x", "oh3nwq-moppe"),   # make refs
              os.path.join(HERE, "..", "..", "..", "reference", "md5x", "oh3nwq-moppe"),
              os.path.join(HERE, "..", "..", "..", "moppe", "reference", "md5x", "oh3nwq-moppe")]
     for c in cands:

@@ -49,6 +49,9 @@ test-mc25: libmc25.so
 test-tmx1: libtmx1.so
 	python3 -m unittest discover -s tests/tmx1
 
+refs:
+	python3 tests/fetch_refs.py
+
 zex: tests/zex/cpm
 	./tests/zex/cpm tests/zex/zexdoc.com
 
@@ -58,4 +61,4 @@ tests/zex/cpm: tests/zex/cpm.c z80.c z80.h
 clean:
 	rm -f *.o r58emu libr58.so libmd5x.so libmc25.so libtmx1.so tests/unit/test_pit tests/unit/test_cdp1802 tests/unit/test_upd7810 tests/zex/cpm
 
-.PHONY: all test test-md5x test-mc25 test-tmx1 zex clean
+.PHONY: all test test-md5x test-mc25 test-tmx1 refs zex clean

@@ -12,3 +12,4 @@ tests/mc25/build/
 libtmx1.so
 tests/unit/test_upd7810
 tests/tmx1/build/
+/reference/

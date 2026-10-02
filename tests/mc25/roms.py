@@ -2,7 +2,8 @@
 Build the MC25 TVL/PTL test firmware (OH5NXO/OH3NWQ mc25.asm v3.6) from
 the firmware repo's gitignored reference/mc25ptl/ (a mirror of
 oh3tr.fi/~ftp/modifications/mobira/mc25ptl/), with the as06 shipped
-there (i386 binary: needs a 32-bit runtime).  MC25_REF points elsewhere.
+there (i386 binary: needs a 32-bit runtime), or from this repo's
+reference/ after `make refs`.  MC25_REF points elsewhere.
 
     python3 tests/mc25/roms.py
 """
@@ -27,6 +28,7 @@ class Unavailable(Exception):
 
 def reference():
     cands = [os.environ.get("MC25_REF"),
+             os.path.join(HERE, "..", "..", "reference", "mc25ptl", "mc25ptl"),   # make refs
              os.path.join(HERE, "..", "..", "..", "reference", "mc25ptl", "mc25ptl"),
              os.path.join(HERE, "..", "..", "..", "moppe", "reference", "mc25ptl", "mc25ptl")]
     for c in cands:

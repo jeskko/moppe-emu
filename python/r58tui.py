@@ -3,6 +3,11 @@
 Interactive terminal front end for the R58 emulator.
 
     python3 emu/python/r58tui.py [--cu cu58] [--card p8n] [--nv radio.nv]
+    python3 python/r58tui.py --rom reference/r58/r58p8x3Z.bin.als --lst ''
+
+The default ROM is the firmware repo's build (firmware/build/r58.bin and
+its .map); in this repo alone, `make refs` fetches the published v3_Z ALs
+binary, which runs without symbols (--lst ''), and is the default then.
 
 Keys (handset):  0-9 * #   c=CL  s=STO  r=RCL  e/Enter=ENT  b=SHIFT(button)
                  + -  (side keys)
@@ -23,6 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from r58emu import Radio, P8E, P8N, CU53AN, CU58AF, AD_SQL, AD_RSSI  # noqa
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+EMU = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+ALS = os.path.join(EMU, "reference", "r58", "r58p8x3Z.bin.als")    # make refs
 
 HOLDS = [0.15, 0.7, 1.5, 3.0]
 KEYMAP = {ord(c): c for c in "0123456789*#+-"}
@@ -39,10 +46,14 @@ def seg7(g):
 
 
 def fresh_nv(args):
-    """Zeroed NV -> SAnE, like a first-time setup."""
+    """Zeroed NV -> SAnE, like a first-time setup.  With symbols the
+    zeroed hook scripts are blanked first (else the boot-time hook edge
+    "types" eight 0 keys); SAnE resets them too, so a ROM without
+    symbols (the published binary) also comes up right."""
     r = Radio(args.rom, args.lst, card=args.card, cu=args.cu)
-    r.poke("cfg_onhook_script", b"\xff" * 8)
-    r.poke("cfg_offhook_script", b"\xff" * 8)
+    if "cfg_onhook_script" in r.sym:
+        r.poke("cfg_onhook_script", b"\xff" * 8)
+        r.poke("cfg_offhook_script", b"\xff" * 8)
     r.run(2.5)
     r.type("828")
     r.press("E")
@@ -91,7 +102,7 @@ def render(r, st, args):
                 "  +-----------+"]
     out.append("")
     L = r.latches()
-    ind = r.peek("indicators")
+    ind = r.peek("indicators") if "indicators" in r.sym else None
     tx = r.transmitting()
     rx = r.rx_hz()
     txf = r.tx_hz()
@@ -112,8 +123,10 @@ def render(r, st, args):
              (3, "KEYLIGHT")) if args.cu == CU53AN else
             ((0, "SERV"), (1, "CALL"), (3, "TX"), (2, "ON"), (6, "LCDLIGHT"),
              (5, "KEYLIGHT")))
-    leds = [n for b, n in bits if ind >> b & 1]
-    out.append("  LEDs: %s" % " ".join(leds))
+    if ind is None:
+        out.append("  LEDs: - (the firmware's indicators byte needs symbols)")
+    else:
+        out.append("  LEDs: %s" % " ".join(n for b, n in bits if ind >> b & 1))
     out.append("  PTT %s  signal %s  hook %s  power switch %s%s" % (
         "DOWN" if st.ptt else "up", "yes" if st.signal else "no",
         "off-hook" if st.offhook else "on-hook",
@@ -231,12 +244,15 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rom", default=os.path.join(ROOT, "firmware/build/r58.bin"))
-    ap.add_argument("--lst", default=os.path.join(ROOT, "firmware/build/r58.map"))
+    ap.add_argument("--lst", default=os.path.join(ROOT, "firmware/build/r58.map"),
+                    help="symbols: sdldz80 .map or as80 listing ('' for none)")
     ap.add_argument("--cu", choices=["cu53", "cu58"], default="cu53")
     ap.add_argument("--card", choices=["p8e", "p8n"], default="p8e")
     ap.add_argument("--nv", help="NV (battery RAM) image to load/save")
     ap.add_argument("--script", help="headless: key script, print screen")
     a = ap.parse_args()
+    if not os.path.exists(a.rom) and a.rom == ap.get_default("rom") and os.path.exists(ALS):
+        a.rom, a.lst = ALS, ""      # no firmware repo around: the published binary
     a.cu = CU58AF if a.cu == "cu58" else CU53AN
     a.card = P8N if a.card == "p8n" else P8E
     if a.script is not None:

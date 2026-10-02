@@ -37,24 +37,52 @@ Overview and conventions: [notes/emulator.md](notes/emulator.md); per radio (lay
 ```sh
 make            # r58emu, libr58.so, libmd5x.so, libmc25.so, libtmx1.so
 make test       # 8254, CDP1802 and uPD7810 unit tests
-make test-md5x  # Talkman scenarios (needs the firmware repo's reference/md5x)
-make test-mc25  # MC25 scenarios (needs the firmware repo's reference/mc25ptl)
-make test-tmx1  # TMF-1/TMN-1 scenarios (needs reference/md5x/oh3nwq-moppe/tmx1_v50.zip)
+make refs       # fetch the test firmware sources (see "Test firmware")
+make test-md5x  # Talkman scenarios
+make test-mc25  # MC25 scenarios
+make test-tmx1  # TMF-1/TMN-1 scenarios
 make zex        # Z80 exerciser (zexdoc), ~75 s
 ```
 
-The R58 scenario tests need a firmware image and run from the firmware
-repo. The Talkman and MC25 tests build their firmware from the third-party
-sources in the firmware repo's gitignored `reference/md5x/` and
-`reference/mc25ptl/` (`MD5X_REF` / `MC25_REF` to point elsewhere) with the 2008 i386 `as06` binary, so they need a 32-bit
-runtime; they skip otherwise. The TMx-1 tests do the same with OH3NWQ's
-`tmx1_v50.zip` and its i386 `as7810` (`TMX1_REF`; as7810 also runs the
-system `cpp`).
+The Talkman, MC25 and TMx-1 tests build their firmware with the
+assemblers the firmware authors shipped: `as06` (2008) and `as7810`
+(2004), i386 Linux binaries, so they need a 32-bit runtime
+(`/lib/ld-linux.so.2`); as7810 also runs the system `cpp`. Without them,
+or without the sources, the tests skip. The R58 scenario tests are in
+the firmware repo.
+
+## Test firmware
+
+None of the firmware the emulator runs is in this repository: it is
+other people's work under their own terms. `make refs`
+(`tests/fetch_refs.py`) downloads what the tests need from the authors'
+own sites into `reference/` (gitignored), checking each file against the
+hash of what was published on 2026-10-02:
+
+| Files | From | Terms |
+|---|---|---|
+| `mx5x.asm`, `md59_v318.zip` (as06): Talkman MD50/MD59/ME59 v3.183 by OH3NWQ | github.com/oh3nwq/moppe | CC BY-NC-SA 3.0 (in the source) |
+| `md50bis/md50.asm`: Talkman rewrite #42 by OH1E | titanix.net/DMR/md50/ | no licence given |
+| `mc25.asm`, `as06`: MC25 TVL/PTL v3.6 by OH5NXO / OH3NWQ | oh3tr.fi/~ftp/modifications/mobira/mc25ptl/ | no licence given |
+| `tmx1_v50.zip`: TMF-1/TMN-1 v5.0, HSN-2/HSF-2 handsets and as7810, by OH5NXO / OH3NWQ / OK2UCX | github.com/oh3nwq/moppe | OH3NWQ's licence (in the zip and the source): licensed amateur use; read it before use |
+| `r58p8x3Z.bin.als`, `r58.asm.als`: R58 v3_Z ALs by OH1E / OH5NXO | titanix.net/DMR/r58/ | no licence given |
+
+The assemblers are OH5NXO's "jas", with no licence statement. Fetching a
+file here is the same as downloading it from its author; keep it out of
+anything you publish. A firmware repo checkout next to the emulator
+(`emu/` as its submodule) supplies the same files from its own
+`reference/` instead, and `MD5X_REF` / `MC25_REF` / `TMX1_REF` point the
+builders anywhere else.
+
+The R58 runs either the firmware repo's build (with its linker map for
+symbols) or, alone, the published ALs binary without symbols:
+`python3 python/r58tui.py` picks that after `make refs`.
 
 Running a ROM:
 
 ```sh
 python3 python/r58tui.py --rom r58.bin --lst r58.map --nv my.nv
+python3 python/r58tui.py --rom reference/r58/r58p8x3Z.bin.als --lst ''   # no symbols
 ```
 
 ```python
@@ -109,6 +137,7 @@ print(r.display(), r.vco_hz())     # ('    30 2', '  433550', ' 0') 454950000.0
 | `python/` | Harnesses (`r58emu.py`, `md5xemu.py`, `mc25emu.py`, `tmx1emu.py`), TUIs (`r58tui.py`, `md5xtui.py`, `mc25tui.py`, `tmx1tui.py`), AFSK decoder, uPD7810 disassembler |
 | `tests/unit/`, `tests/zex/` | 8254, CDP1802 and uPD7810 unit tests, CP/M harness for zexdoc/zexall |
 | `tests/md5x/`, `tests/mc25/`, `tests/tmx1/` | Talkman, MC25 and TMx-1 firmware builders (`roms.py`) and scenarios |
+| `tests/fetch_refs.py` | `make refs`: fetches the test firmware from its authors' sites |
 | `notes/` | Design notes |
 
 Licence: MIT (`LICENSE`). `tests/zex/zex*.com` are Frank Cringle's Z80

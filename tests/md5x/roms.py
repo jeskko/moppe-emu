@@ -4,7 +4,8 @@ reference sources: OH3NWQ mx5x.asm v3.183 and OH1E md50.asm #42, with the
 as06 assembler from the OH3NWQ v3.18 release zip.
 
 The sources live in the firmware repo's reference/md5x/ (see its
-notes/md5x.md); set MD5X_REF to point elsewhere.  as06 is a 2008 i386
+notes/md5x.md), or in this repo's reference/md5x/ after `make refs`; set
+MD5X_REF to point elsewhere.  as06 is a 2008 i386
 Linux binary, so a 32-bit runtime (/lib/ld-linux.so.2) is needed.
 
     python3 tests/md5x/roms.py          # build all, print paths
@@ -35,6 +36,7 @@ BUILDS = {
 
 def reference():
     cands = [os.environ.get("MD5X_REF"),
+             os.path.join(HERE, "..", "..", "reference", "md5x"),   # make refs
              os.path.join(HERE, "..", "..", "..", "reference", "md5x"),   # emu/ in moppe
              os.path.join(HERE, "..", "..", "..", "moppe", "reference", "md5x")]
     for c in cands:
