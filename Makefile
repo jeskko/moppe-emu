@@ -52,8 +52,11 @@ test-tmx1: libtmx1.so
 refs:
 	python3 tests/fetch_refs.py
 
+ZEX = tests/zex/ZEXALL
+
 zex: tests/zex/cpm
-	./tests/zex/cpm tests/zex/zexdoc.com
+	@test -f $(ZEX)/zexdoc.com || { echo "$(ZEX) missing: git submodule update --init"; exit 1; }
+	./tests/zex/cpm $(ZEX)/zexdoc.com
 
 tests/zex/cpm: tests/zex/cpm.c z80.c z80.h
 	$(CC) -O2 -o $@ tests/zex/cpm.c z80.c

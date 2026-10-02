@@ -41,7 +41,7 @@ make refs       # fetch the test firmware sources (see "Test firmware")
 make test-md5x  # Talkman scenarios
 make test-mc25  # MC25 scenarios
 make test-tmx1  # TMF-1/TMN-1 scenarios
-make zex        # Z80 exerciser (zexdoc), ~75 s
+make zex        # Z80 exerciser (zexdoc, from the ZEXALL submodule), ~75 s
 ```
 
 The Talkman, MC25 and TMx-1 tests build their firmware with the
@@ -135,10 +135,12 @@ print(r.display(), r.vco_hz())     # ('    30 2', '  433550', ' 0') 454950000.0
 | `tmx1.c`, `tmx1hs.c`, `tmx1_api.c` | TMF-1/TMN-1 radio unit and MBUS, HSN-2/HSF-2 handsets, flat API |
 | `api.c`, `main.c` | Flat API, CLI smoke run (`r58emu`) |
 | `python/` | Harnesses (`r58emu.py`, `md5xemu.py`, `mc25emu.py`, `tmx1emu.py`), TUIs (`r58tui.py`, `md5xtui.py`, `mc25tui.py`, `tmx1tui.py`), AFSK decoder, uPD7810 disassembler |
-| `tests/unit/`, `tests/zex/` | 8254, CDP1802 and uPD7810 unit tests, CP/M harness for zexdoc/zexall |
+| `tests/unit/`, `tests/zex/` | 8254, CDP1802 and uPD7810 unit tests, CP/M harness for zexdoc/zexall (`tests/zex/ZEXALL` submodule) |
 | `tests/md5x/`, `tests/mc25/`, `tests/tmx1/` | Talkman, MC25 and TMx-1 firmware builders (`roms.py`) and scenarios |
 | `tests/fetch_refs.py` | `make refs`: fetches the test firmware from its authors' sites |
 | `notes/` | Design notes |
 
-Licence: MIT (`LICENSE`). `tests/zex/zex*.com` are Frank Cringle's Z80
-instruction exercisers (third-party binaries, under their own terms).
+Licence: MIT (`LICENSE`). Frank Cringle's Z80 instruction exercisers
+(zexdoc, zexall; GPL v2) are not part of this repo: `tests/zex/ZEXALL` is
+a submodule of [agn453/ZEXALL](https://github.com/agn453/ZEXALL) (clone
+with `--recursive`, or `git submodule update --init`).

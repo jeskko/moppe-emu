@@ -1,0 +1,3 @@
+[submodule "tests/zex/ZEXALL"]
+	path = tests/zex/ZEXALL
+	url = https://github.com/agn453/ZEXALL
