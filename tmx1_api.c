@@ -52,6 +52,7 @@ int    tmx1api_dev(tmx1 *m) { return m->dev; }
 int    tmx1api_lfu(tmx1 *m, int n) { return m->lfu[n & 3]; }
 int    tmx1api_dac(tmx1 *m, int n) { return m->dac[n & 3]; }
 int    tmx1api_out2(tmx1 *m) { return m->out2; }
+int    tmx1api_oplen(tmx1 *m, int a) { return upd7810_oplen(&m->cpu, (uint16_t)a); }
 
 void
 tmx1api_read(tmx1 *m, int addr, int n, uint8_t *out)

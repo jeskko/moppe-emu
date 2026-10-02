@@ -96,6 +96,7 @@ def lib():
             "tmx1api_lfu": (I, [vp, I]),
             "tmx1api_dac": (I, [vp, I]),
             "tmx1api_out2": (I, [vp]),
+            "tmx1api_oplen": (I, [vp, I]),
             "tmx1api_read": (None, [vp, I, I, C.c_char_p]),
             "tmx1api_write": (None, [vp, I, I, C.c_char_p]),
             "tmx1api_ram": (I, [vp, C.c_char_p, C.c_char_p]),
