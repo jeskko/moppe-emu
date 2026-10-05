@@ -330,6 +330,11 @@ class Radio:
     def i2c_count(self):
         return self.L.r40api_i2c_count(self.m)
 
+    def dac(self):
+        """the MC144111's four 6-bit outputs (1 = RFC, RX front-end tuning;
+        the Nokia firmware writes 2 = 4 and 1 = 3)"""
+        return [self.L.r40api_dac(self.m, k) for k in range(4)]
+
     def out(self, n):
         return self.L.r40api_out(self.m, n)
 

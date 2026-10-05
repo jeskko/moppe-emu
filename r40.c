@@ -596,6 +596,10 @@ p1_changed(r40 *m, uint8_t pins)
 		int bit = (pins & P1_SDOUT) != 0;
 		m->sbits = m->sbits << 1 | (uint32_t)bit;
 		m->snbits++;
+		if (!(m->out0 & O0_DACCS)) {
+			m->dac_sr = (m->dac_sr << 1 | (uint32_t)bit) & 0xFFFFFF;
+			m->dac_n++;
+		}
 		if (m->out0 & O0_RTCCS)
 			rtc_clock_rise(m, bit);
 	}
@@ -613,13 +617,18 @@ out0_write(r40 *m, uint8_t v)
 	m->out0 = v;
 	if (v != old)
 		ev(m, R40_EV_OUT0, v);
-	/* DAC: bits shifted while /CS low, latched as /CS rises */
-	if (!(v & O0_DACCS) && (old & O0_DACCS))
+	/* DAC: a 24-bit register clocked while /CS is low and copied to the
+	 * four outputs as /CS rises (channel 1 = the first of the last 24 bits).
+	 * Bits from earlier selects stay: the Nokia firmware shifts 12 bits
+	 * (two values) per select, so channels 1/3 and 2/4 get the same pair. */
+	if (!(v & O0_DACCS) && (old & O0_DACCS)) {
 		m->snbits = 0;
-	if ((v & O0_DACCS) && !(old & O0_DACCS) && m->snbits >= 24) {
+		m->dac_n = 0;
+	}
+	if ((v & O0_DACCS) && !(old & O0_DACCS) && m->dac_n > 0) {
 		int k;
 		for (k = 0; k < 4; k++) {
-			m->dac[k] = (uint8_t)((m->sbits >> (18 - 6 * k)) & 0x3F);
+			m->dac[k] = (uint8_t)((m->dac_sr >> (18 - 6 * k)) & 0x3F);
 			ev(m, R40_EV_DAC, k << 8 | m->dac[k]);
 		}
 		m->dac_loads++;

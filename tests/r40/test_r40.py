@@ -170,6 +170,18 @@ class Calibration(unittest.TestCase):
         r.press("RCL", hold=0.3, gap=1.0)
         self.assertEqual(r.display()[0], "1     06000 43750000")
 
+    def test_rx_tuning_dac(self):
+        # test 36 steps RFC; the firmware shifts two 6-bit values per
+        # select (12 bits) and the DAC keeps the other 12, so channels 1
+        # and 3 move together
+        r = service_radio(self.nv)
+        ok(r, "36", wait=1.0)
+        self.assertEqual(r.dac(), [0, 0, 0, 0])
+        r.press("UP", hold=0.3, gap=1.0)
+        r.press("UP", hold=0.3, gap=1.0)
+        self.assertEqual(r.display()[2].split(), ["075", "002"])
+        self.assertEqual(r.dac(), [2, 0, 2, 0])
+
     def test_parameter_programming(self):
         # 70 OK 1234 FNC STO, then simplex channel 1 (parameter 030):
         # RX and TX physical channels and the status, stored on leaving

@@ -93,6 +93,9 @@ typedef struct r40 {
 	uint32_t sbits;		/* bits shifted on CLK rising, MSB-first */
 	int      snbits;
 	uint8_t  sreg[3];	/* 4094 outputs */
+	uint32_t dac_sr;	/* MC144111 shift register: clocked only while
+				   selected; keeps its bits between selects */
+	int      dac_n;		/* bits clocked in this select */
 	uint8_t  dac[4];
 	unsigned dac_loads;
 
