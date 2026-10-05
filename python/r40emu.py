@@ -24,15 +24,18 @@ STOP = {0: "time", 1: "break", 2: "watch", 3: "off"}
 
 # CU43 keypad: (row on IC200, column on IC190), found by pressing each
 # matrix position in service mode (digits echo, OK runs a test, CLR
-# deletes).  The other function keys (FNC, STO, RCL, arrows; 9 positions
-# in column 0, column 4 and row 4) are not identified yet.  PWR is not in
-# the matrix: power_key().
+# deletes; FNC then STO enters parameter programming; UP / DOWN change a
+# test's value; RCL steps test 36 to the next tuning frequency).  STO is
+# the RCL key after FNC.  ALPHA, the handset key, HF and F1 sit among the
+# unexplained positions (1,0), (0,4) and row 4.  PWR is not in the
+# matrix: power_key().
 KEYS = {
     "1": (0, 3), "2": (0, 2), "3": (0, 1),
     "4": (1, 3), "5": (1, 2), "6": (1, 1),
     "7": (2, 3), "8": (2, 2), "9": (2, 1),
     "*": (3, 3), "0": (3, 2), "#": (3, 1),
-    "OK": (1, 4), "CLR": (3, 0),
+    "OK": (1, 4), "CLR": (3, 0), "FNC": (2, 0), "RCL": (0, 0), "STO": (0, 0),
+    "UP": (2, 4), "DOWN": (3, 4),
 }
 
 # the 'S' glyph of the R40 font; the table starts 0x33 characters before it
@@ -238,8 +241,9 @@ class Radio:
         return rows
 
     # the top row has 20 characters on the same 24 five-column cells as the
-    # others; cells 2, 9, 16 and 23 are not characters on the glass
-    TOP_GAPS = (2, 9, 16, 23)
+    # others; cells 2, 9, 14 and 21 are not characters on the glass (2, 9
+    # and 21 from the firmware's text, 14 by symmetry)
+    TOP_GAPS = (2, 9, 14, 21)
 
     def _cells(self, cols):
         out = []

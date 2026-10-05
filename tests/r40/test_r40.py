@@ -54,7 +54,7 @@ class Service(unittest.TestCase):
         # lost-NV errors, then the LOCAL display "spacing ch phys freq / rsl"
         r = Radio(ROM, service_head=True, power=False)
         d = r.service_mode()
-        self.assertEqual(d[0], "0 000 00000  00000 0")
+        self.assertEqual(d[0], "0 000 00000 00000000")
         self.assertEqual(d[1], "rsl")
         reads = [b for _, b in r.i2c_log() if b[0] == 0xA1]
         self.assertTrue(reads and reads[0][1:3] == bytes([0x3A, 0x01]))
@@ -78,6 +78,117 @@ class Service(unittest.TestCase):
         r.power_key(False)
         r.run(20.0)
         self.assertNotEqual(r.display()[1], "rsl")
+
+
+# PE1BVU's 70 cm set-up, in his order: 0-channels 400 / 445 MHz (test 18),
+# simplex (16), 12.5 kHz and band D (15), calibration frequencies (10-12)
+BAND_SETUP = ["18164000", "18271200", "16200000", "151", "155",
+              "1043000000", "1143500000", "1244000000"]
+
+# NV blocks (start, length, checksum byte), from the firmware's table at
+# 0x36966; each has a copy at +0x2000
+NV_BLOCKS = [(0x000, 0x12B, 0x12B), (0x12C, 0x09, 0x135), (0x136, 0x95, 0x1CB),
+             (0x1CC, 0x225, 0x3F1), (0x3F2, 0x95, 0x487), (0x488, 0x5E5, 0xA6D),
+             (0xA6E, 0x41A, 0xE88), (0xE89, 0x220, 0x10A9), (0x10AA, 0x1F4, 0x129E),
+             (0x129F, 0x35C, 0x15FB), (0x15FC, 0x78, 0x1674)]
+
+
+def service_radio(nv=None):
+    r = Radio(ROM, nv=nv, service_head=True, power=False)
+    r.service_mode()
+    return r
+
+
+def ok(r, keys, wait=1.5):
+    r.type(keys)
+    r.press("OK", hold=0.3, gap=wait)
+
+
+def fnc_sto(r):
+    r.press("FNC")
+    r.press("STO", hold=0.3, gap=1.0)
+
+
+class Calibration(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        r = service_radio()
+        for t in BAND_SETUP:
+            ok(r, t)
+        cls.nv = r.nv()
+
+    def test_band_stored_as_physical_channels(self):
+        # (f - 400 MHz) / 6.25 kHz, RX and TX words, at 0x56 / 0x5A / 0x5E
+        nv = self.nv
+        for off, ch in ((0x56, 4800), (0x5A, 5600), (0x5E, 6400)):
+            self.assertEqual(nv[off:off + 4], (ch.to_bytes(2, "big") * 2))
+        self.assertEqual(int.from_bytes(nv[0x64:0x68], "big"), 64000)
+        self.assertEqual(int.from_bytes(nv[0x68:0x6C], "big"), 71200)
+        self.assertEqual(nv[0x63], 0x80)     # 155: band D
+        self.assertEqual(nv[0x71], 0x01)     # 151: 12.5 kHz
+        self.assertEqual(nv[0x128], 0x02)    # 16 2...: simplex
+
+    def test_block_checksums(self):
+        # both copies equal; the band set-up lives in the first block (the
+        # cold start fills several others; 0x12C and 0x15FC stay unwritten)
+        nv = self.nv
+        self.assertEqual(nv[0:0x1680], nv[0x2000:0x3680])
+        start, n, cks = NV_BLOCKS[0]
+        self.assertEqual(start + n, cks)
+        self.assertEqual(sum(nv[start: cks + 1]) & 0xFF, 0xFF)
+
+    def test_service_display_and_synthesizers(self):
+        # test 11 tunes 435.000 MHz: physical channel 5600; RX VCO 45 MHz
+        # above; TX parked 62.5 kHz off until PTT
+        r = service_radio(self.nv)
+        ok(r, "11")
+        self.assertEqual(r.display()[0], "1     05600 43500000")
+        self.assertEqual(r.pll(0)[-1], 480e6)
+        self.assertEqual(r.pll(1)[-1], 435.0625e6)
+        r.ptt(True)
+        r.run(0.5)
+        self.assertEqual(r.pll(1)[-1], 435e6)
+        self.assertEqual(r.out(1) & 1, 1)                # TX ON
+        r.ptt(False)
+        r.run(0.5)
+        self.assertEqual(r.pll(1)[-1], 435.0625e6)
+
+    def test_up_down_and_rcl(self):
+        r = service_radio(self.nv)
+        ok(r, "31", wait=1.0)
+        self.assertEqual(r.display()[2].split(), ["075", "10"])
+        r.press("DOWN", hold=0.3, gap=1.0)
+        self.assertEqual(r.display()[2].split(), ["075", "00"])
+        r.press("*", hold=0.3, gap=1.0)
+        ok(r, "36", wait=1.0)
+        r.press("UP", hold=0.3, gap=1.0)
+        self.assertEqual(r.display()[2].split(), ["075", "001"])
+        # RCL: the next tuning frequency, 1.5 MHz up and then 1 MHz steps
+        r.press("RCL", hold=0.3, gap=1.0)
+        self.assertEqual(r.display()[0], "1     05840 43650000")
+        r.press("RCL", hold=0.3, gap=1.0)
+        self.assertEqual(r.display()[0], "1     06000 43750000")
+
+    def test_parameter_programming(self):
+        # 70 OK 1234 FNC STO, then simplex channel 1 (parameter 030):
+        # RX and TX physical channels and the status, stored on leaving
+        r = service_radio(self.nv)
+        ok(r, "70", wait=1.0)
+        r.type("1234")
+        fnc_sto(r)
+        self.assertEqual(r.display()[:2], ["700", "Parameters programming"])
+        ok(r, "030", wait=1.0)
+        for v in ("4886", "4886", "000"):
+            r.type(v)
+            fnc_sto(r)
+        r.press("*", hold=0.3, gap=2.0)
+        self.assertEqual(r.display()[1], "rsl")
+        nv = r.nv()
+        for base in (0x0000, 0x2000):
+            self.assertEqual(nv[base + 0x53C: base + 0x542], bytes.fromhex("131613160000"))
+            self.assertEqual(nv[base + 0x542: base + 0x546], b"\xff" * 4)  # empty entry
+            self.assertEqual(sum(nv[base + 0x488: base + 0xA6E]) & 0xFF, 0xFF)
+        self.assertEqual(no_faults(r), [])
 
 
 if __name__ == "__main__":

@@ -661,24 +661,25 @@ out1_write(r40 *m, uint8_t v)
 	}
 }
 
-/* PLL: SD sampled on CLK rising, latched by the STE / SRE strobes */
+/* PLL: SD and CLK go to both synthesizer chips, so each holds the same
+ * shift register contents; a chip's strobe (SRE, STE) copies the last bits
+ * into its R latch (control bit 1: SW R13..R0) or N/A latch (control bit
+ * 0: N10..N0 A6..A0).  The firmware shifts the reference word once and
+ * strobes both chips with it. */
 static void
 pll_latch(r40 *m, int which)
 {
 	r40_pll *p = &m->pll[which];
 	uint32_t s = m->pll_bits;
-	int n = m->pll_n;
-	if (n >= 16 && (s & 1)) {	/* reference register: SW R13..R0 C=1 */
+	if (s & 1) {
 		p->r = (s >> 1) & 0x3FFF;
 		p->sw = (s >> 15) & 1;
-	} else if (n >= 19) {		/* N10..N0 A6..A0 C=0 */
+	} else {
 		p->a = (s >> 1) & 0x7F;
 		p->n = (s >> 8) & 0x7FF;
 	}
 	p->loads++;
-	ev(m, R40_EV_SYNTH, which | n << 8);
-	m->pll_n = 0;
-	m->pll_bits = 0;
+	ev(m, R40_EV_SYNTH, which | m->pll_n << 8);
 }
 
 static void
@@ -694,6 +695,8 @@ p7_changed(r40 *m, uint8_t pins)
 		pll_latch(m, 0);
 	if ((pins & P7_STE) && !(old & P7_STE))
 		pll_latch(m, 1);
+	if ((pins & (P7_SRE | P7_STE)) && !(old & (P7_SRE | P7_STE)))
+		m->pll_n = 0;
 }
 
 double
@@ -703,7 +706,9 @@ r40_pll_hz(const r40 *m, int which)
 	double pre = p->sw ? 64 : 128;
 	if (!p->r)
 		return 0;
-	return (pre * p->n + p->a) * m->ref_hz / p->r;
+	/* the PLL chip counts the VCO's second harmonic (OH5NXO's pll.s);
+	 * the result is the VCO frequency */
+	return (pre * p->n + p->a) * m->ref_hz / p->r / 2;
 }
 
 /* -------------------------------------------------------------- bus */
