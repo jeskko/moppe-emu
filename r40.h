@@ -76,6 +76,7 @@ typedef struct r40_i2clog {
 
 #define R40_EVQ 4096
 #define R40_TRACE 4096
+#define R40_COV   0x40000	/* ROM addresses covered by the coverage map */
 
 typedef struct r40 {
 	h8532    chip;
@@ -142,6 +143,11 @@ typedef struct r40 {
 
 	uint32_t trace[R40_TRACE];
 	unsigned trace_pos;
+	uint8_t  *cov;		/* R40_COV flags, allocated on demand: 1 executed,
+				 * 2 entered other than from the previous
+				 * instruction (jump, call, return, interrupt),
+				 * 4 call target, 8 exception entry */
+	uint32_t cov_next;
 	uint8_t  *bp;		/* 16 MB / 8 bitmap, allocated on demand */
 	int      nbp;
 	uint8_t  skip_bp;

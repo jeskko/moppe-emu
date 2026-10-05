@@ -129,6 +129,18 @@ r40api_trace(r40 *m, int n, int *out)
 	return n;
 }
 
+/* coverage map of the ROM (R40_COV bytes, flags in r40.h): the first
+ * call starts recording; out, if given, receives the map so far */
+int
+r40api_coverage(r40 *m, uint8_t *out)
+{
+	if (!m->cov && !(m->cov = calloc(1, R40_COV)))
+		return -1;
+	if (out)
+		memcpy(out, m->cov, R40_COV);
+	return R40_COV;
+}
+
 /* I2C log: total count; entry k (k < total, the last R40_I2CLOG kept) */
 int r40api_i2c_count(r40 *m) { return (int)m->i2clog_n; }
 

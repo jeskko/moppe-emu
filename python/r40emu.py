@@ -93,6 +93,7 @@ def lib():
             "r40api_cpu": (None, [vp, ip]),
             "r40api_event": (I, [vp, C.POINTER(D), ip, ip]),
             "r40api_trace": (I, [vp, I, ip]),
+            "r40api_coverage": (I, [vp, cp]),
             "r40api_i2c_count": (I, [vp]),
             "r40api_i2c_entry": (I, [vp, I, C.POINTER(D), cp]),
         }
@@ -304,6 +305,15 @@ class Radio:
         a = (C.c_uint * 5)()
         hz = self.L.r40api_pll(self.m, which, a)
         return tuple(a) + (hz,)
+
+    def coverage(self):
+        """ROM coverage map (flags per address: 1 executed, 2 entered by a
+        jump, call, return or interrupt, 4 call target, 8 exception
+        entry).  The first call starts recording
+        and returns the empty map."""
+        buf = C.create_string_buffer(0x40000)
+        self.L.r40api_coverage(self.m, buf)
+        return buf.raw
 
     def i2c_log(self, since=0):
         """[(time, bytes)] of completed I2C transfers from index since."""

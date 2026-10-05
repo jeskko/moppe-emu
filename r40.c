@@ -832,12 +832,25 @@ periodic(r40 *m)
 	fx429_run(m);
 }
 
+/* JSR, PJSR or BSR at a (for the coverage map's call-target flag) */
+static int
+is_call(r40 *m, uint32_t a)
+{
+	uint8_t b0 = r40_peek(m, a), b1;
+	if (b0 == 0x03 || b0 == 0x0E || b0 == 0x1E || b0 == 0x18)
+		return 1;
+	if (b0 != 0x11)
+		return 0;
+	b1 = r40_peek(m, a + 1) & 0xF8;
+	return b1 == 0xC8 || b1 == 0xD8 || b1 == 0xE8 || b1 == 0xF8;
+}
+
 int
 r40_step(r40 *m)
 {
 	h8500 *c = &m->chip.cpu;
 	uint32_t pc;
-	int n;
+	int n, call;
 
 	if (!m->powered) {
 		m->clk += 8;
@@ -852,9 +865,19 @@ r40_step(r40 *m)
 	if (!c->sleeping) {
 		m->trace[m->trace_pos] = pc;
 		m->trace_pos = (m->trace_pos + 1) % R40_TRACE;
+		if (m->cov && pc < R40_COV) {
+			m->cov[pc] |= pc == m->cov_next ? 1 : 3;
+			m->cov_next = pc + (uint32_t)h8500_oplen(c, pc);
+		}
 	}
+	call = m->cov && !c->sleeping && is_call(m, pc);
 	n = h8532_step(&m->chip);
 	m->clk += (uint64_t)n;
+	if (m->cov) {
+		uint32_t to = h8500_pc24(c);
+		if (to < R40_COV && (call || c->last_exc >= 0))
+			m->cov[to] |= c->last_exc >= 0 ? 8 : 4;
+	}
 	if (c->illegal) {
 		c->illegal = 0;
 		ev(m, R40_EV_ILLEGAL, (int)c->op_addr);
@@ -972,4 +995,6 @@ r40_free(r40 *m)
 {
 	free(m->bp);
 	m->bp = NULL;
+	free(m->cov);
+	m->cov = NULL;
 }
