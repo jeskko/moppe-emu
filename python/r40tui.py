@@ -61,6 +61,13 @@ def open_radio(args, st):
         except roms.Unavailable as e:
             sys.exit(str(e))
     nv = None
+    if args.make_nv:
+        args.nv = args.nv or "r40.nv"
+        if not os.path.exists(args.nv):
+            import r40nv
+            print("building %s with r40nv.py (service-mode set-up, ~15 s)" % args.nv)
+            with open(args.nv, "wb") as f:
+                f.write(r40nv.default_nv(rom))
     if args.nv and os.path.exists(args.nv):
         with open(args.nv, "rb") as f:
             nv = f.read()
@@ -233,6 +240,9 @@ if __name__ == "__main__":
     ap.add_argument("--pixels", action="store_true", help="pixel view of the LCD")
     ap.add_argument("--nv", help="NV image to load")
     ap.add_argument("--save-nv", action="store_true", help="save --nv back on quit")
+    ap.add_argument("--make-nv", action="store_true",
+                    help="build --nv (default r40.nv) with r40nv.py if it does not exist:"
+                         " a set-up radio instead of Error 6")
     ap.add_argument("--script", help="headless: token script, print screen")
     ap.add_argument("--ok-wait", type=float, default=1.5,
                     help="script: seconds to run after OK/FNC/UP/DOWN (1.5)")

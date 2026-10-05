@@ -13,6 +13,7 @@ sys.path.insert(0, HERE)
 
 import roms                      # noqa: E402
 from r40emu import Radio, font_from_rom   # noqa: E402
+import r40nv                     # noqa: E402
 
 try:
     ROM = roms.rom()
@@ -189,6 +190,50 @@ class Calibration(unittest.TestCase):
             self.assertEqual(nv[base + 0x542: base + 0x546], b"\xff" * 4)  # empty entry
             self.assertEqual(sum(nv[base + 0x488: base + 0xA6E]) & 0xFF, 0xFF)
         self.assertEqual(no_faults(r), [])
+
+
+class DefaultNV(unittest.TestCase):
+    """r40nv.py: the service-mode procedure gives an image that boots clean"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.nv = r40nv.default_nv(ROM)
+
+    def test_boots_without_errors(self):
+        shown = r40nv.boot_messages(ROM, self.nv)
+        self.assertIn(["Self test", "Self test OK", "325555"], shown)
+        self.assertFalse([d for d in shown if d[0].startswith("Error")])
+        self.assertEqual(shown[-1][:2], ["999_", "Number unobtainable"])
+
+    def test_service_mode_reports_nothing_lost(self):
+        r = Radio(ROM, nv=self.nv, service_head=True, power=False)
+        r.power_key(True)
+        r.power(True)
+        shown = []
+        while r.time() < 12:
+            r.run(0.2)
+            if r.time() > 5:
+                r.power_key(False)
+            shown.append(r.display()[0])
+        self.assertFalse([d for d in shown if d.startswith("Error")])
+        self.assertEqual(r.display()[0], "1     05600 43500000")
+
+    def test_contents(self):
+        nv = self.nv
+        for base in (0x0000, 0x2000):
+            # simplex channel 1 = 433.500 MHz, RX and TX
+            self.assertEqual(nv[base + 0x53C: base + 0x542], bytes.fromhex("14f014f00000"))
+            # band calibration after 190002: 430 / 435 / 440 MHz
+            self.assertEqual(nv[base + 0x56: base + 0x62],
+                             bytes.fromhex("12c012c015e015e019001900"))
+            for start, n, cks in NV_BLOCKS:
+                if start not in (0x12C, 0x15FC):      # never written
+                    self.assertEqual(sum(nv[base + start: base + cks + 1]) & 0xFF, 0xFF,
+                                     hex(base + start))
+
+    def test_channel_numbers(self):
+        self.assertEqual(r40nv.channel(430.5375), 4886)   # PE1BVU's table
+        self.assertRaises(ValueError, r40nv.channel, 433.501)
 
 
 if __name__ == "__main__":
