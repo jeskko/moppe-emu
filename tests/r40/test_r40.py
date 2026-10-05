@@ -222,7 +222,7 @@ class DefaultNV(unittest.TestCase):
         nv = self.nv
         for base in (0x0000, 0x2000):
             # simplex channel 1 = 433.500 MHz, RX and TX
-            self.assertEqual(nv[base + 0x53C: base + 0x542], bytes.fromhex("14f014f00000"))
+            self.assertEqual(nv[base + 0x53C: base + 0x542], bytes.fromhex("14f014f00800"))
             # band calibration after 190002: 430 / 435 / 440 MHz
             self.assertEqual(nv[base + 0x56: base + 0x62],
                              bytes.fromhex("12c012c015e015e019001900"))
@@ -230,6 +230,26 @@ class DefaultNV(unittest.TestCase):
                 if start not in (0x12C, 0x15FC):      # never written
                     self.assertEqual(sum(nv[base + start: base + cks + 1]) & 0xFF, 0xFF,
                                      hex(base + start))
+
+    def test_simplex_channel(self):
+        # *55*n# selects parameter record n if its st byte has bit 3 (the
+        # check at 0x34B34); #55# leaves
+        r = Radio(ROM, nv=self.nv)
+        r.run(10)
+        for _ in range(4):
+            r.press("CLR", hold=0.2, gap=0.3)       # the entry starts with 999
+        r.type("*55*30#")
+        r.run(2)
+        self.assertEqual(r.display()[1:], ["Simplex channel: 030", "Squelch ON  Mode OPEN"])
+        self.assertEqual(r.pll(0)[-1], 478.5e6)              # 433.500 + 45 MHz
+        r.ptt(True)
+        r.run(1)
+        self.assertEqual((r.pll(1)[-1], r.out(1) & 1), (433.5e6, 1))
+        r.ptt(False)
+        r.run(1)
+        r.type("#55#")
+        r.run(2)
+        self.assertEqual(r.display()[1], "Call ended")
 
     def test_channel_numbers(self):
         self.assertEqual(r40nv.channel(430.5375), 4886)   # PE1BVU's table

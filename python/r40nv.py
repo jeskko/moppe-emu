@@ -12,8 +12,9 @@ manual): the firmware writes its own checksums and copies.
 
 Defaults: band D, 12.5 kHz raster, simplex, calibration 430 / 435 /
 440 MHz, D-band tuning defaults from the ROM (tests 172, 190002), own
-number 325555, simplex channels 1-5 (parameters 030-034) on 433.500,
-433.450, 433.475, 433.525, 433.550 MHz, squelch levels 121 / 118
+number 325555, simplex channels in parameter records 030-034 on 433.500,
+433.450, 433.475, 433.525, 433.550 MHz with `st` 008 (bit 3: usable for
+simplex; dial `*55*30#` .. `*55*34#` in normal mode, `#55#` to leave), squelch levels 121 / 118
 (PE1BVU; tests 33, 34), no transmit time limit (759), no telephone
 limits (702).  The squelch delays (31, 32) are factory tests that are
 not stored ("doesn't affect the radio in the system mode", service
@@ -105,6 +106,9 @@ class Session:
         self.say("parameter %03d" % number)
 
 
+SIMPLEX_ST = "008"     # parameter record st byte, bit 3: simplex channel (0x34B34)
+
+
 def default_nv(rom, channels=DEFAULT_CHANNELS, own="325555",
                band=(430.0, 435.0, 440.0), squelch=(121, 118), log=None):
     """run the procedure on an empty NV RAM; returns the 32 KB image"""
@@ -123,7 +127,7 @@ def default_nv(rom, channels=DEFAULT_CHANNELS, own="325555",
     s.parameters()
     s.parameter(800, own)
     for k, (rx, tx) in enumerate(channels[:5]):
-        s.parameter(30 + k, channel(rx), channel(tx), "000")
+        s.parameter(30 + k, channel(rx), channel(tx), SIMPLEX_ST)
     s.parameter(759, "000")
     s.parameter(702, "000")
     s.leave()
