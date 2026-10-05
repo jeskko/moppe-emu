@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import os
 import sys
+import tarfile
 import urllib.request
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -25,6 +26,7 @@ REF = os.path.join(ROOT, "reference")
 OH3NWQ = "https://github.com/oh3nwq/moppe/raw/master/"
 OH3TR_MC25 = "https://oh3tr.fi/~ftp/modifications/mobira/mc25ptl/"
 TITANIX = "https://titanix.net/DMR/"
+OH5NXO_TGZ = "https://oh3tr.fi/~ftp/modifications/sorsat/oh5nxo.mods.2018.tar.gz"
 
 # (path under reference/, URL, sha256, what)
 FILES = [
@@ -44,7 +46,26 @@ FILES = [
      "cdfe7016a9917664", "OH1E/OH5NXO R58 firmware v3_Z ALs (binary, runs without symbols)"),
     ("r58/r58.asm.als", TITANIX + "r58/r58.asm.als",
      "70c4426ade7823bd", "its as80 source (reference only)"),
+    # a member of a 339 MB archive: streamed, the rest not kept
+    ("oh5nxo/mods/R40-manuals/rc40_rom/ABSBIN",
+     OH5NXO_TGZ + "#mods/R40-manuals/rc40_rom/ABSBIN",
+     "5da1d0854c45361a", "Nokia RC40 original firmware Cr 13.04-0 (1993), from OH5NXO's archive"),
 ]
+
+
+def fetch(url):
+    """the file at url, or url#member: that member of a .tar.gz, streamed
+    until it is found"""
+    if "#" not in url:
+        with urllib.request.urlopen(url, timeout=120) as f:
+            return f.read()
+    url, member = url.split("#", 1)
+    with urllib.request.urlopen(url, timeout=120) as f:
+        with tarfile.open(fileobj=f, mode="r|gz") as t:
+            for ti in t:
+                if ti.name == member:
+                    return t.extractfile(ti).read()
+    raise OSError("%s not in the archive" % member)
 
 
 def sha(data):
@@ -69,8 +90,7 @@ def main():
             continue
         else:
             try:
-                with urllib.request.urlopen(url, timeout=120) as f:
-                    data = f.read()
+                data = fetch(url)
             except OSError as e:
                 print("FAILED   %s  %s: %s" % (path, url, e))
                 bad += 1

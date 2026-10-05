@@ -13,3 +13,5 @@ libtmx1.so
 tests/unit/test_upd7810
 tests/tmx1/build/
 /reference/
+libr40.so
+tests/unit/test_h8500

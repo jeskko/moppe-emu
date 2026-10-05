@@ -9,6 +9,7 @@ note with its layers, model table, fidelity evidence and known limits.
 | Talkman MD50 / MD59 / ME59 | `cdp1802.c` (1802 / 1806) | `md5x.c`; `cu53an.c` | [md5x.md](md5x.md) |
 | MC25 TVL / PTL | `cdp1802.c` | `mc25.c`; `cu41.c` | [mc25.md](mc25.md) |
 | TMF-1 / TMN-1 (Talkman 520 / 620) | `upd7810.c` (radio and handset) | `tmx1.c`; `tmx1hs.c` (HSN-2, HSF-2) | [tmx1.md](tmx1.md) |
+| R40 (RC40 / RD40) | `h8500.c`, `h8532.c` (H8/532) | `r40.c` (L100, CU43) | [r40.md](r40.md) |
 
 Shared chips: `pit.c` (Intel 8254 / 8253: R58, ME59, TMx-1), `pio.c`,
 `sio.c`, `daisy.c` (R58).
