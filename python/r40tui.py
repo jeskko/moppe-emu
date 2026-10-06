@@ -2,9 +2,15 @@
 """
 Interactive terminal front end for the Nokia R40 (RC40 / RD40) emulator.
 
-    python3 emu/python/r40tui.py [--rom ABSBIN] [--service] [--pixels]
-                                 [--nv radio.nv [--save-nv]]
+    python3 emu/python/r40tui.py [--factory | --rom IMAGE] [--service]
+                                 [--pixels] [--nv radio.nv [--save-nv]]
     python3 emu/python/r40tui.py --service --script "18164000 OK wait:1.5"
+
+Firmware: the ham firmware by default ($R40_HAM, else r40/build/r40.bin
+of the repository that has this one as its emu/ submodule; build it there
+with `make -C r40`); --factory runs the original Nokia firmware
+(tests/r40/roms.py finds it); --rom runs any image.  --service and
+--make-nv are for the Nokia firmware and imply --factory.
 
 Keys (CU43):   0-9 * #   Enter=OK  Backspace=CLR  f=FNC  r=RCL/STO
                Up / Down arrows = UP / DOWN
@@ -52,14 +58,31 @@ class State:
         self.msg = ""
 
 
-def open_radio(args, st):
-    import roms
-    rom = args.rom
-    if not rom:
+# the ham firmware's image in the repository that contains emu/
+HAM_ROM = os.path.join(HERE, "..", "..", "r40", "build", "r40.bin")
+
+
+def firmware(args):
+    """the image to run: --rom, the Nokia ROM (--factory, also implied by
+    --service and --make-nv), or the ham firmware"""
+    if args.rom:
+        return args.rom
+    if args.factory or args.service or args.make_nv:
+        import roms
         try:
-            rom = roms.rom()
+            return roms.rom()
         except roms.Unavailable as e:
             sys.exit(str(e))
+    rom = os.environ.get("R40_HAM", HAM_ROM)
+    if not os.path.exists(rom):
+        sys.exit("no ham firmware image at %s: build it with `make -C r40` in the "
+                 "firmware repository, set R40_HAM, or use --factory / --rom"
+                 % os.path.normpath(rom))
+    return rom
+
+
+def open_radio(args, st):
+    rom = firmware(args)
     nv = None
     if args.make_nv:
         args.nv = args.nv or "r40.nv"
@@ -234,7 +257,9 @@ def main(stdscr, args, r, st):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--rom", help="R40 ROM image (default: tests/r40/roms.py)")
+    ap.add_argument("--rom", help="R40 ROM image (default: the ham firmware)")
+    ap.add_argument("--factory", action="store_true",
+                    help="the original Nokia firmware (tests/r40/roms.py)")
     ap.add_argument("--service", action="store_true",
                     help="CU43PROG service head, start in LOCAL mode")
     ap.add_argument("--pixels", action="store_true", help="pixel view of the LCD")
