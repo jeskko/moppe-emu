@@ -81,6 +81,7 @@ def lib():
             "r40api_out": (I, [vp, I]),
             "r40api_sreg": (I, [vp, I]),
             "r40api_dac": (I, [vp, I]),
+            "r40api_tmo_rises": (C.c_uint, [vp]),
             "r40api_pcf": (I, [vp, I]),
             "r40api_oplen": (I, [vp, I]),
             "r40api_sci_baud": (D, [vp]),
@@ -334,6 +335,11 @@ class Radio:
         """the MC144111's four 6-bit outputs (1 = RFC, RX front-end tuning;
         the Nokia firmware writes 2 = 4 and 1 = 3)"""
         return [self.L.r40api_dac(self.m, k) for k in range(4)]
+
+    def tmo_rises(self):
+        """rising edges on TMO (P1.7) so far: the tone generator (beeps,
+        CCIR, the Fii / CTCSS path); frequency = edges / time"""
+        return self.L.r40api_tmo_rises(self.m)
 
     def out(self, n):
         return self.L.r40api_out(self.m, n)

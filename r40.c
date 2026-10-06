@@ -975,10 +975,19 @@ r40_load_rom(r40 *m, const char *path)
 	return (int)n;
 }
 
+/* TMO: the tone generator's square wave (SIGN: beeps, CCIR, Fii) */
+static void
+tmo_edge(void *ctx, int level)
+{
+	r40 *m = ctx;
+	if (level)
+		m->tmo_rises++;
+}
+
 void
 r40_init(r40 *m)
 {
-	h8532_bus b = { m, bus_read, bus_write, port_out, adc, sci_tx, NULL };
+	h8532_bus b = { m, bus_read, bus_write, port_out, adc, sci_tx, tmo_edge };
 	memset(m, 0, sizeof(*m));
 	memset(m->rom, 0xFF, sizeof(m->rom));
 	h8532_init(&m->chip, &b, R40_HZ);

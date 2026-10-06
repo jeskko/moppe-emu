@@ -98,6 +98,7 @@ typedef struct r40 {
 	int      dac_n;		/* bits clocked in this select */
 	uint8_t  dac[4];
 	unsigned dac_loads;
+	unsigned tmo_rises;	/* TMO (P1.7) rising edges: tones, beeps */
 
 	r40_pll  pll[2];	/* 0 RX, 1 TX */
 	uint32_t pll_bits;	/* SD bits clocked since the last strobe */

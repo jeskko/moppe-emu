@@ -41,6 +41,7 @@ int    r40api_watch_addr(r40 *m) { return (int)m->watch_addr; }
 int    r40api_out(r40 *m, int n) { return n ? m->out1 : m->out0; }
 int    r40api_sreg(r40 *m, int n) { return m->sreg[n % 3]; }
 int    r40api_dac(r40 *m, int n) { return m->dac[n & 3]; }
+unsigned r40api_tmo_rises(r40 *m) { return m->tmo_rises; }
 int    r40api_pcf(r40 *m, int n) { return m->pcf[n % 3]; }
 int    r40api_oplen(r40 *m, int a) { return h8500_oplen(&m->chip.cpu, (uint32_t)a); }
 double r40api_sci_baud(r40 *m) { return h8532_sci_baud(&m->chip); }
