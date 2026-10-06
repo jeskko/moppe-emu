@@ -235,10 +235,16 @@ class Radio:
         return out
 
     def pixels(self):
-        """24 rows of 120 pixels, '#' set."""
+        """the glass: 24 pixel rows, '#' set.  Rows 0-7 (the top text row)
+        are 100 columns, its 20 characters: the gap cells (TOP_GAPS) are not
+        on the glass and are left out, as display() does; rows 8-23 are
+        120 columns."""
+        gap = {c for g in self.TOP_GAPS for c in range(5 * g, 5 * g + 5)}
         rows = []
         for y in range(24):
             cols = self.columns(y // 8)
+            if y < 8:
+                cols = [b for x, b in enumerate(cols) if x not in gap]
             rows.append("".join("#" if (b >> (y % 8)) & 1 else "." for b in cols))
         return rows
 

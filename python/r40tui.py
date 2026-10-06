@@ -125,7 +125,7 @@ def render_text(r, st, args):
         px = r.pixels()
         for y in range(0, 24, 2):
             s = ""
-            for x in range(120):
+            for x in range(len(px[y])):
                 a, b = px[y][x] == "#", px[y + 1][x] == "#"
                 s += "█" if a and b else "▀" if a else "▄" if b else " "
             out.append(" " + s)
