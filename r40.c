@@ -1002,7 +1002,7 @@ r40_init(r40 *m)
 	m->eeprom[1] = 0x01;
 	m->eeprom[2] = 0xF0;
 	m->an[0] = 300;			/* RSSI */
-	m->an[1] = 512;			/* SQ */
+	m->an[1] = 600;			/* SQ: noise, above Nokia's default levels (136/133 x 4) */
 	m->an[4] = 700;			/* +VB */
 	m->rtc[0] = 0x00; m->rtc[1] = 0x00; m->rtc[2] = 0x12;
 	m->rtc[3] = 0x05; m->rtc[4] = 0x10; m->rtc[5] = 0x01; m->rtc[6] = 0x26;

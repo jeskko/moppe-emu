@@ -238,6 +238,12 @@ class DefaultNV(unittest.TestCase):
             # band calibration after 190002: 430 / 435 / 440 MHz
             self.assertEqual(nv[base + 0x56: base + 0x62],
                              bytes.fromhex("12c012c015e015e019001900"))
+            # 190002's TX power (3 levels x 10 bands of 7 MHz) and RX
+            # tuning (71 x 1 MHz) defaults, committed by FNC STO in 36 / 201
+            self.assertEqual(nv[base + 0x74: base + 0x92], bytes.fromhex(
+                "0d" * 10 + "1d1d1d1d1d1e1f202020" + "29" * 5 + "2a" * 5))
+            self.assertEqual(nv[base + 0xD9: base + 0xDB], b"\x1a\x1a")
+            self.assertEqual(nv[base + 0x11F], 0x2C)
             for start, n, cks in NV_BLOCKS:
                 if start not in (0x12C, 0x15FC):      # never written
                     self.assertEqual(sum(nv[base + start: base + cks + 1]) & 0xFF, 0xFF,

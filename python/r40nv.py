@@ -11,7 +11,8 @@ manual): the firmware writes its own checksums and copies.
     nv = default_nv(rom)                       # bytes for Radio(rom, nv=nv)
 
 Defaults: band D, 12.5 kHz raster, simplex, calibration 430 / 435 /
-440 MHz, D-band tuning defaults from the ROM (tests 172, 190002), own
+440 MHz, D-band tuning defaults from the ROM (tests 172, 190002; the
+RX tuning and TX power tables committed with FNC STO in tests 36, 201), own
 number 325555, simplex channels in parameter records 030-034 on 433.500,
 433.450, 433.475, 433.525, 433.550 MHz with `st` 008 (bit 3: usable for
 simplex; dial `*55*30#` .. `*55*34#` in normal mode, `#55#` to leave), squelch levels 121 / 118
@@ -118,6 +119,15 @@ def default_nv(rom, channels=DEFAULT_CHANNELS, own="325555",
     # 190002, which overwrites the calibration words), then 10-12
     for t in ("18164000", "18271200", "16200000", "151", "155", "172", "190002"):
         s.test(t, wait=2.0)
+    # 190002 fills only the working copy, which the next power-on
+    # replaces with the committed one; FNC STO in tests 36 (RX tuning)
+    # and 201 (TX power, all three levels) commits those tables, as a
+    # factory tuning would (deviation, test 21, stays 0 either way)
+    for t in ("36", "201"):
+        s.test(t, wait=1.0)
+        s.store()
+        if s.r.display()[1] != "rsl":     # 36 stays in the test, 20x leaves
+            s.leave()
     for k, mhz in enumerate(band):
         s.test("1%d%08d" % (k, round(mhz * 1e5)))
     # squelch opening / closing level (33, 34)
