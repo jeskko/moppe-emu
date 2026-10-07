@@ -182,6 +182,19 @@ class Calibration(unittest.TestCase):
         self.assertEqual(r.display()[2].split(), ["075", "002"])
         self.assertEqual(r.dac(), [2, 0, 2, 0])
 
+    def test_rx_tuning_automatic(self):
+        # 36 and OK twice quickly: the firmware searches RFC for the
+        # highest RSSI (tuning instructions); the front-end model puts the
+        # peak at RFC 20 for 435 MHz (this image's table is empty: 0)
+        r = service_radio(self.nv)
+        r.set_rf_opt([max(0, i - 15) for i in range(71)])
+        ok(r, "11", wait=1.0)
+        r.type("36")
+        r.press("OK", hold=0.2, gap=0.1)
+        r.press("OK", hold=0.2, gap=3.0)
+        self.assertEqual(r.display()[2].split(), ["075", "020"])
+        self.assertEqual(r.dac()[2], 20)
+
     def test_parameter_programming(self):
         # 70 OK 1234 FNC STO, then simplex channel 1 (parameter 030):
         # RX and TX physical channels and the status, stored on leaving

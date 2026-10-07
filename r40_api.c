@@ -41,6 +41,16 @@ int    r40api_watch_addr(r40 *m) { return (int)m->watch_addr; }
 int    r40api_out(r40 *m, int n) { return n ? m->out1 : m->out0; }
 int    r40api_sreg(r40 *m, int n) { return m->sreg[n % 3]; }
 int    r40api_dac(r40 *m, int n) { return m->dac[n & 3]; }
+
+/* the front-end model's optimum RFC per MHz (R40_RF_BANDS bytes), or
+ * NULL: off, RSSI is AN0 as set */
+void
+r40api_set_rf_opt(r40 *m, const uint8_t *opt)
+{
+	m->rf_model = opt != NULL;
+	if (opt)
+		memcpy(m->rf_opt, opt, R40_RF_BANDS);
+}
 unsigned r40api_tmo_rises(r40 *m) { return m->tmo_rises; }
 int    r40api_pcf(r40 *m, int n) { return m->pcf[n % 3]; }
 int    r40api_oplen(r40 *m, int a) { return h8500_oplen(&m->chip.cpu, (uint32_t)a); }

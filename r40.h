@@ -50,6 +50,8 @@ typedef struct r40_event {
 } r40_event;
 
 /* Fujitsu dual-modulus PLL as loaded by the firmware */
+#define R40_RF_BANDS 71
+
 typedef struct r40_pll {
 	uint32_t r, sw, n, a;
 	unsigned loads;
@@ -117,6 +119,10 @@ typedef struct r40 {
 
 	/* analogue inputs, 0..1023 */
 	int      an[8];
+	/* RX front end (off unless set): the RFC (DAC Q2) that tunes it
+	 * best per MHz from 400 MHz; RSSI drops as RFC moves off it */
+	int      rf_model;
+	uint8_t  rf_opt[R40_RF_BANDS];
 
 	/* PCF8584 */
 	uint8_t  i_s0, i_s0own, i_s1, i_s2, i_s3, i_stat;
