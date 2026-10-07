@@ -120,8 +120,10 @@ typedef struct r40 {
 	/* analogue inputs, 0..1023 */
 	int      an[8];
 	/* RX front end (off unless set): the RFC (DAC Q2) that tunes it
-	 * best per MHz from 400 MHz; RSSI drops as RFC moves off it */
+	 * best per MHz from rf_base (400 MHz on 70 cm, 138 on 2 m); RSSI
+	 * drops as RFC moves off it */
 	int      rf_model;
+	double   rf_base;
 	uint8_t  rf_opt[R40_RF_BANDS];
 
 	/* PCF8584 */

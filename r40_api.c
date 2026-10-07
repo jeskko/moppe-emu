@@ -42,12 +42,13 @@ int    r40api_out(r40 *m, int n) { return n ? m->out1 : m->out0; }
 int    r40api_sreg(r40 *m, int n) { return m->sreg[n % 3]; }
 int    r40api_dac(r40 *m, int n) { return m->dac[n & 3]; }
 
-/* the front-end model's optimum RFC per MHz (R40_RF_BANDS bytes), or
- * NULL: off, RSSI is AN0 as set */
+/* the front-end model's optimum RFC per MHz from base_hz (R40_RF_BANDS
+ * bytes), or NULL: off, RSSI is AN0 as set */
 void
-r40api_set_rf_opt(r40 *m, const uint8_t *opt)
+r40api_set_rf_opt(r40 *m, const uint8_t *opt, double base_hz)
 {
 	m->rf_model = opt != NULL;
+	m->rf_base = base_hz;
 	if (opt)
 		memcpy(m->rf_opt, opt, R40_RF_BANDS);
 }

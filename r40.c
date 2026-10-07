@@ -789,11 +789,11 @@ port_out(void *ctx, int p, uint8_t pins, uint8_t ddr)
 
 /* RSSI with the front-end model: AN0 where RFC is the band's optimum,
  * falling off as 16 / (16 + d^2) (a quarter of it 12 steps off).  The
- * band is the whole MHz of the RX frequency (VCO - 45 MHz) above 400 */
+ * band is the whole MHz of the RX frequency (VCO - 45 MHz) above rf_base */
 static int
 rssi(const r40 *m)
 {
-	double f = r40_pll_hz(m, 0) - 445e6;
+	double f = r40_pll_hz(m, 0) - 45e6 - m->rf_base;
 	int band = f < 0 ? 0 : (int)(f / 1e6);
 	int d;
 

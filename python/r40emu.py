@@ -81,7 +81,7 @@ def lib():
             "r40api_out": (I, [vp, I]),
             "r40api_sreg": (I, [vp, I]),
             "r40api_dac": (I, [vp, I]),
-            "r40api_set_rf_opt": (None, [vp, cp]),
+            "r40api_set_rf_opt": (None, [vp, cp, D]),
             "r40api_tmo_rises": (C.c_uint, [vp]),
             "r40api_pcf": (I, [vp, I]),
             "r40api_oplen": (I, [vp, I]),
@@ -210,11 +210,13 @@ class Radio:
     def set_adc(self, ch, value):
         self.L.r40api_set_adc(self.m, ch, value)
 
-    def set_rf_opt(self, opt):
+    def set_rf_opt(self, opt, base_mhz=400):
         """RX front-end model: opt[i] is the RFC (DAC Q2) that tunes
-        400 + i MHz best (71 values); RSSI is AN0 there and falls off as
-        16 / (16 + d^2) d steps away.  None: off"""
-        self.L.r40api_set_rf_opt(self.m, None if opt is None else bytes(opt).ljust(71, b"\0")[:71])
+        base_mhz + i MHz best (71 values; base 400 on 70 cm, 138 on 2 m);
+        RSSI is AN0 there and falls off as 16 / (16 + d^2) d steps away.
+        None: off"""
+        self.L.r40api_set_rf_opt(self.m, None if opt is None else bytes(opt).ljust(71, b"\0")[:71],
+                                 base_mhz * 1e6)
 
     def modem_rx(self, b):
         self.L.r40api_modem_rx(self.m, b)
