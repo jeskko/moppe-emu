@@ -5,7 +5,7 @@ Interactive terminal front end for the R58 emulator.
     python3 emu/python/r58tui.py [--cu cu58] [--card p8n] [--nv radio.nv]
     python3 python/r58tui.py --rom reference/r58/r58p8x3Z.bin.als --lst ''
 
-The default ROM is the firmware repo's build (firmware/build/r58.bin and
+The default ROM is the firmware repo's build (r58/build/r58.bin and
 its .map); in this repo alone, `make refs` fetches the published v3_Z ALs
 binary, which runs without symbols (--lst ''), and is the default then.
 
@@ -243,8 +243,8 @@ def main(stdscr, args):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--rom", default=os.path.join(ROOT, "firmware/build/r58.bin"))
-    ap.add_argument("--lst", default=os.path.join(ROOT, "firmware/build/r58.map"),
+    ap.add_argument("--rom", default=os.path.join(ROOT, "r58/build/r58.bin"))
+    ap.add_argument("--lst", default=os.path.join(ROOT, "r58/build/r58.map"),
                     help="symbols: sdldz80 .map or as80 listing ('' for none)")
     ap.add_argument("--cu", choices=["cu53", "cu58"], default="cu53")
     ap.add_argument("--card", choices=["p8e", "p8n"], default="p8e")

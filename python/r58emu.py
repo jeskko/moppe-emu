@@ -2,7 +2,7 @@
 Python harness for the R58 emulator (libr58.so via ctypes).
 
     from r58emu import Radio
-    r = Radio("firmware/build/r58.bin", listing="firmware/build/r58.map")
+    r = Radio("r58/build/r58.bin", listing="r58/build/r58.map")
     r.run(2.0)
     print(r.display())
     r.type("433500#")
@@ -96,7 +96,7 @@ def lib():
 
 
 def load_symbols(listing):
-    """Symbol table {name: value} from the sdldz80 map (firmware/build/r58.map)
+    """Symbol table {name: value} from the sdldz80 map (r58/build/r58.map)
     or an as80 listing.  A .lst without an as80 symbol table (an sdas
     listing) is read through the .map next to it."""
     if not listing.endswith(".map"):
@@ -123,7 +123,7 @@ def _as80_symbols(listing):
 
 def _map_symbols(path):
     """Globals from the linker map.  The assembler's labels are absolute
-    symbols there (tools/asmpp.py), so which of them are labels comes from
+    symbols there (tools/r58/asmpp.py), so which of them are labels comes from
     the .labels file written next to the map; symbols of relocatable areas
     (C code and data) are labels too."""
     syms, labels = {}, set()
@@ -154,7 +154,7 @@ def _map_symbols(path):
     for (a, n), (b, _) in zip(order, order[1:] + order[-1:]):
         sizes[n] = b - a
     SIZES[path] = sizes
-    # bank 2 is linked at 0x28000 + offset (tools/ihx2bin.py): the CPU
+    # bank 2 is linked at 0x28000 + offset (tools/r58/ihx2bin.py): the CPU
     # sees its window address
     return {n: v & 0xFFFF if 0x28000 <= v < 0x2C000 else v for n, v in syms.items()}
 

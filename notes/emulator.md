@@ -34,7 +34,7 @@ Shared chips: `pit.c` (Intel 8254 / 8253: R58, ME59, TMx-1), `pio.c`,
 
 Any change: `make test`, the board scenario suites (`make test-md5x`,
 `test-mc25`, `test-tmx1`), and from the firmware repo its test suite
-(`python3 tools/ci/runtests.py`) and `tools/emuoracle.py` against the old
+(`python3 tools/ci/runtests.py`) and `tools/r58/emuoracle.py` against the old
 library (run it with `R58_LIB=` the old library and diff): behaviour must
 stay bit-identical unless the change is meant to alter it.
 
