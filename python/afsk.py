@@ -1,6 +1,8 @@
 """
 Bell 202 AFSK (1200/2200 Hz, 1200 baud) + AX.25/HDLC decoder, used to
-check the firmware's cycle-counted APRS transmitter in the emulator.
+check the firmware's cycle-counted APRS transmitter in the emulator, and
+the matching encoder (ax25_frame, modulate, encode) to feed packets into
+an emulated receiver.
 """
 import math
 
@@ -134,4 +136,87 @@ def ax25_text(frame):
 
 
 def decode(samples, rate=48000):
+    if not samples:
+        return []
     return [ax25_text(f) for f in hdlc_frames(nrzi(demod_bits(samples, rate)))]
+
+
+# ------------------------------------------------------------------ encoder
+
+def ax25_addr(call, last=False, repeated=False):
+    """7-byte AX.25 address field for "CALL-SSID" (a trailing * marks a
+    digipeater that has repeated the frame)"""
+    if call.endswith("*"):
+        call, repeated = call[:-1], True
+    name, _, ssid = call.partition("-")
+    b = bytes((ord(c) << 1) for c in name.upper().ljust(6)[:6])
+    return b + bytes([0x60 | (int(ssid or 0) & 15) << 1
+                      | (0x80 if repeated else 0) | (1 if last else 0)])
+
+
+def ax25_frame(text):
+    """UI frame (without FCS) from TNC2 text "SRC>DST,PATH1,PATH2:info"."""
+    head, _, info = text.partition(":")
+    src, _, rest = head.partition(">")
+    calls = rest.split(",")
+    dst, path = calls[0], calls[1:]
+    addrs = [dst, src] + path
+    out = b"".join(ax25_addr(c, last=(i == len(addrs) - 1))
+                   for i, c in enumerate(addrs))
+    if isinstance(info, str):
+        info = info.encode("latin-1")
+    return out + b"\x03\xF0" + info
+
+
+def hdlc_bits(frame, preamble=32, tail=4):
+    """Bits (LSB first) of flags, the frame plus its FCS with zero
+    stuffing, and closing flags; before NRZI."""
+    fcs = crc16_x25(frame)
+    data = frame + bytes([fcs & 0xFF, fcs >> 8])
+    flag = [0, 1, 1, 1, 1, 1, 1, 0]
+    bits = flag * preamble
+    ones = 0
+    for byte in data:
+        for k in range(8):
+            b = byte >> k & 1
+            bits.append(b)
+            if b:
+                ones += 1
+                if ones == 5:
+                    bits.append(0)
+                    ones = 0
+            else:
+                ones = 0
+    return bits + flag * tail
+
+
+def nrzi_encode(bits, level=1):
+    """AX.25 NRZI: a 0 toggles the tone, a 1 keeps it (1 = mark)."""
+    out = []
+    for b in bits:
+        if not b:
+            level ^= 1
+        out.append(level)
+    return out
+
+
+def modulate(tones, rate=48000, baud=1200, amp=1.0, phase=0.0):
+    """Phase-continuous Bell 202: 1 = mark 1200 Hz, 0 = space 2200 Hz."""
+    out = []
+    t = 0.0
+    spb = rate / baud
+    n = 0
+    for tone in tones:
+        f = 1200.0 if tone else 2200.0
+        end = round((n + 1) * spb)
+        while t < end:
+            out.append(amp * math.sin(phase))
+            phase += 2 * math.pi * f / rate
+            t += 1
+        n += 1
+    return out
+
+
+def encode(text, rate=48000, preamble=32, amp=1.0):
+    """Audio samples (-amp..amp) of one AX.25 UI frame given as TNC2 text."""
+    return modulate(nrzi_encode(hdlc_bits(ax25_frame(text), preamble)), rate, amp=amp)

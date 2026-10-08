@@ -15,3 +15,5 @@ tests/tmx1/build/
 /reference/
 libr40.so
 tests/unit/test_h8500
+libmdr150.so
+tests/unit/test_cpu16

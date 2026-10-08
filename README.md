@@ -11,7 +11,8 @@ MD50/MD59/ME59** (CDP1802/1806) with CU53 or CU59 handsets, the
 TMF-1 / TMN-1** (Talkman 520 / 620, uPD7810) with an HSN-2 or HSF-2
 handset running its own firmware, and the **Nokia R40** (RC40/RD40,
 Hitachi H8/532) running its original Nokia firmware with a CU43 control
-head.
+head, and the **Comarco MDR150** data radio (68HC16Z1) running OH5NXO's
+HaMDR ham firmware.
 
 The firmware it was built for, and its scenario and differential tests,
 live in the firmware repo (`moppe`), which has this repo as the `emu/`
@@ -32,20 +33,23 @@ submodule.
 | uPD7810 core | `upd7810.c`: uPD7810/78C10 instruction set with data-sheet state counts, timers, event counter, async serial, A/D, edge flags, interrupts. Unit test; decoder checked against as7810 on every instruction form |
 | H8/500 core | `h8500.c` (maximum mode) and `h8532.c` (H8/532 ports, FRT1-3, 8-bit timer, SCI, A/D, WDT, interrupt controller). Unit test |
 | R40 | `r40.c`: L100 logic board (latches, serial bus, PLLs, PCF8584, FX429 at byte level) and CU43 control head (PCF8574 keypad, PCF8578/79 LCD, 24C02 service key); `r40_api.c` (`libr40.so`), `python/r40emu.py`. Boots the RC40 firmware Cr 13.04 to its self test and error display, and into the LOCAL service mode with a service head: [notes/r40.md](notes/r40.md) |
+| CPU16 core | `cpu16.c` with `cpu16tab.h` generated from the Reference Manual's instruction table (`tools/cpu16tab.py`): whole instruction set incl. the MAC unit, manual clock counts plus bus-access cost. Unit test with hc16-assembled programs; `python/cpu16dis.py` |
+| MDR150 | `hc16z1.c` (SIM chip selects, ports, PIT, watchdog, standby RAM, GPT with PWM, QSM SCI, ADC), `mdr150.c` (Am29F010, RAM, 4094 + MB1504 radio module, AFSK audio in/out, serial mux); `mdr150_api.c` (`libmdr150.so`), `python/mdr150emu.py`. Runs OH5NXO's HaMDR 174: console, config to flash, APRS beacon out, AFSK in, digipeating, KISS: [notes/mdr150.md](notes/mdr150.md) |
 | TMx-1 | `tmx1.c` radio unit (PLLs, DAC, LFU, 8253, modem at byte level, watchdog, power), `tmx1hs.c` HSN-2 / HSF-2 handsets (uPD7228 LCDs, keypad, LEDs, DTMF), bit-level MBUS between the two CPUs; `tmx1_api.c` (`libtmx1.so`), `python/tmx1emu.py`, `python/tmx1tui.py`, `python/upd7810dis.py`. Runs OH5NXO/OH3NWQ tmx1.asm v5.0 with HSN-2 v1.6 / HSF-2 v0.2: [notes/tmx1.md](notes/tmx1.md) |
 
-Overview and conventions: [notes/emulator.md](notes/emulator.md); per radio (layers, timing model, fidelity evidence, limits): [r58](notes/r58.md), [md5x](notes/md5x.md), [mc25](notes/mc25.md), [tmx1](notes/tmx1.md), [r40](notes/r40.md).
+Overview and conventions: [notes/emulator.md](notes/emulator.md); per radio (layers, timing model, fidelity evidence, limits): [r58](notes/r58.md), [md5x](notes/md5x.md), [mc25](notes/mc25.md), [tmx1](notes/tmx1.md), [r40](notes/r40.md), [mdr150](notes/mdr150.md).
 
 ## Build and test
 
 ```sh
-make            # r58emu, libr58.so, libmd5x.so, libmc25.so, libtmx1.so, libr40.so
-make test       # 8254, CDP1802, uPD7810 and H8/500 unit tests
+make            # r58emu, libr58.so, libmd5x.so, libmc25.so, libtmx1.so, libr40.so, libmdr150.so
+make test       # 8254, CDP1802, uPD7810, H8/500 and CPU16 unit tests
 make refs       # fetch the test firmware sources (see "Test firmware")
 make test-md5x  # Talkman scenarios
 make test-mc25  # MC25 scenarios
 make test-tmx1  # TMF-1/TMN-1 scenarios
 make test-r40   # R40 scenarios (original Nokia firmware)
+make test-mdr150 # MDR150 scenarios (HaMDR 174)
 make zex        # Z80 exerciser (zexdoc, from the ZEXALL submodule), ~75 s
 ```
 
@@ -72,12 +76,13 @@ hash of what was published on 2026-10-02:
 | `tmx1_v50.zip`: TMF-1/TMN-1 v5.0, HSN-2/HSF-2 handsets and as7810, by OH5NXO / OH3NWQ / OK2UCX | github.com/oh3nwq/moppe | OH3NWQ's licence (in the zip and the source): licensed amateur use; read it before use |
 | `r58p8x3Z.bin.als`, `r58.asm.als`: R58 v3_Z ALs by OH1E / OH5NXO | titanix.net/DMR/r58/ | no licence given |
 | `rc40_rom/ABSBIN`: original Nokia RC40 firmware Cr 13.04-0 (1993), streamed out of OH5NXO's 339 MB archive `oh5nxo.mods.2018.tar.gz` | oh3tr.fi/~ftp/modifications/sorsat/ | Nokia's; for testing only, never redistribute |
+| `MDR150/hamdr/hamdr.hex`, `bootstrap`: HaMDR 174 (2012) and the MDR150 bootstrap (2009) by OH5NXO, from the same archive, in the same pass | oh3tr.fi/~ftp/modifications/sorsat/ | no licence given |
 
 The assemblers are OH5NXO's "jas", with no licence statement. Fetching a
 file here is the same as downloading it from its author; keep it out of
 anything you publish. A firmware repo checkout next to the emulator
 (`emu/` as its submodule) supplies the same files from its own
-`reference/` instead, and `MD5X_REF` / `MC25_REF` / `TMX1_REF` point the
+`reference/` instead, and `MD5X_REF` / `MC25_REF` / `TMX1_REF` / `MDR150_REF` point the
 builders anywhere else.
 
 The R58 runs either the firmware repo's build (with its linker map for

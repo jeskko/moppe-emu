@@ -50,22 +50,41 @@ FILES = [
     ("oh5nxo/mods/R40-manuals/rc40_rom/ABSBIN",
      OH5NXO_TGZ + "#mods/R40-manuals/rc40_rom/ABSBIN",
      "5da1d0854c45361a", "Nokia RC40 original firmware Cr 13.04-0 (1993), from OH5NXO's archive"),
+    ("oh5nxo/mods/MDR150/hamdr/hamdr.hex",
+     OH5NXO_TGZ + "#mods/MDR150/hamdr/hamdr.hex",
+     "4d0a108bb13095f2", "OH5NXO HaMDR 174 (2012-09-17) for the MDR150, his 2015 build"),
+    ("oh5nxo/mods/MDR150/hamdr/bootstrap",
+     OH5NXO_TGZ + "#mods/MDR150/hamdr/bootstrap",
+     "8cf1319ad3211cf4", "OH5NXO MDR150 bootstrap (2009-12-06), binary"),
 ]
 
 
-def fetch(url):
+_members = {}
+
+
+def fetch(url, wanted=()):
     """the file at url, or url#member: that member of a .tar.gz, streamed
-    until it is found"""
+    until it is found; the other members in wanted (url#member too) found
+    on the way are kept for their own fetch, so one pass serves them all"""
     if "#" not in url:
         with urllib.request.urlopen(url, timeout=120) as f:
             return f.read()
-    url, member = url.split("#", 1)
-    with urllib.request.urlopen(url, timeout=120) as f:
+    if url in _members:
+        return _members.pop(url)
+    base, member = url.split("#", 1)
+    want = {w.split("#", 1)[1] for w in wanted if w.startswith(base + "#")}
+    want.add(member)
+    with urllib.request.urlopen(base, timeout=120) as f:
         with tarfile.open(fileobj=f, mode="r|gz") as t:
             for ti in t:
-                if ti.name == member:
-                    return t.extractfile(ti).read()
-    raise OSError("%s not in the archive" % member)
+                if ti.name in want:
+                    _members[base + "#" + ti.name] = t.extractfile(ti).read()
+                    want.discard(ti.name)
+                    if not want:
+                        break
+    if url not in _members:
+        raise OSError("%s not in the archive" % member)
+    return _members.pop(url)
 
 
 def sha(data):
@@ -79,6 +98,8 @@ def main():
     ap.add_argument("--force", action="store_true", help="fetch again")
     a = ap.parse_args()
     bad = 0
+    todo = [u for p, u, w, x in FILES
+            if a.force or not os.path.exists(os.path.join(REF, p))]
     for path, url, want, what in FILES:
         dst = os.path.join(REF, path)
         if os.path.exists(dst) and not a.force:
@@ -90,7 +111,7 @@ def main():
             continue
         else:
             try:
-                data = fetch(url)
+                data = fetch(url, todo)
             except OSError as e:
                 print("FAILED   %s  %s: %s" % (path, url, e))
                 bad += 1

@@ -10,6 +10,7 @@ note with its layers, model table, fidelity evidence and known limits.
 | MC25 TVL / PTL | `cdp1802.c` | `mc25.c`; `cu41.c` | [mc25.md](mc25.md) |
 | TMF-1 / TMN-1 (Talkman 520 / 620) | `upd7810.c` (radio and handset) | `tmx1.c`; `tmx1hs.c` (HSN-2, HSF-2) | [tmx1.md](tmx1.md) |
 | R40 (RC40 / RD40) | `h8500.c`, `h8532.c` (H8/532) | `r40.c` (L100, CU43) | [r40.md](r40.md) |
+| Comarco MDR150 | `cpu16.c`, `hc16z1.c` (68HC16Z1) | `mdr150.c` | [mdr150.md](mdr150.md) |
 
 Shared chips: `pit.c` (Intel 8254 / 8253: R58, ME59, TMx-1), `pio.c`,
 `sio.c`, `daisy.c` (R58).
@@ -33,7 +34,7 @@ Shared chips: `pit.c` (Intel 8254 / 8253: R58, ME59, TMx-1), `pio.c`,
 ## Changing the emulator
 
 Any change: `make test`, the board scenario suites (`make test-md5x`,
-`test-mc25`, `test-tmx1`), and from the firmware repo its test suite
+`test-mc25`, `test-tmx1`, `test-r40`, `test-mdr150`), and from the firmware repo its test suite
 (`python3 tools/ci/runtests.py`) and `tools/r58/emuoracle.py` against the old
 library (run it with `R58_LIB=` the old library and diff): behaviour must
 stay bit-identical unless the change is meant to alter it.
