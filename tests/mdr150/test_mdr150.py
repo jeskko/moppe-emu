@@ -162,5 +162,48 @@ class Kiss(unittest.TestCase):
                          kiss(afsk.ax25_frame("OH5ABC>APRS,WIDE2-2:>hello kiss")))
 
 
+@unittest.skipIf(IMAGE is None, IMAGE is None and WHY)
+class Tui(unittest.TestCase):
+    """the terminal UI's session, headless: preset, packets on the air,
+    KISS and transmitted frames in its AX.25 log"""
+
+    def test_digi_preset(self):
+        import mdr150tui as T
+
+        class Args:
+            flash = None
+            preset = "digi"
+            rssi, audio, noise, busy = 600, 300, 150, False
+        s = T.Session(Args())
+        s.run(3)
+        s.canned()
+        s.canned(far=True)
+        s.run(9)
+        log = [(tag, text) for at, tag, text in s.log]
+        self.assertIn(("<rf", "OH3RDX>APZMDR:!6141.21N/02444.64E#"), log)
+        self.assertIn(("rf>", "OH5ABC-9>APRS,WIDE1-1:!6140.00N/02445.00E>near station #1"), log)
+        self.assertIn(("<rf", "OH5ABC-9>APRS,OH3RDX*:!6140.00N/02445.00E>near station #1"), log)
+        self.assertEqual([t for tag, t in log if tag == "<rf"],
+                         ["OH3RDX>APZMDR:!6141.21N/02444.64E#",
+                          "OH5ABC-9>APRS,OH3RDX*:!6140.00N/02445.00E>near station #1"])
+        self.assertIn("RX 144.8000 MHz", "\n".join(s.state_lines()))
+
+    def test_kiss_preset(self):
+        import mdr150tui as T
+
+        class Args:
+            flash = None
+            preset = "kiss"
+            rssi, audio, noise, busy = 600, 300, 150, False
+        s = T.Session(Args())
+        s.run(1)
+        s.send_kiss("OH3RDR>APRS:>from the host")
+        s.send_rf("OH5ABC>APRS:>to the host")
+        s.run(6)
+        log = [(tag, text) for at, tag, text in s.log]
+        self.assertIn(("<rf", "OH3RDR>APRS:>from the host"), log)
+        self.assertIn(("<kiss", "OH5ABC>APRS:>to the host"), log)
+
+
 if __name__ == "__main__":
     unittest.main()

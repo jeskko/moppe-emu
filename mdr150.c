@@ -1,6 +1,7 @@
 /*
  * Comarco MDR150 board; see mdr150.h.
  */
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -408,6 +409,8 @@ mdr150_power(mdr150 *r, int on)
 		memset(r->ram, 0, sizeof(r->ram));
 		r->sr_out = 0xFF;
 		r->pf = 0xFF;
+		r->pll_na = r->pll_r = r->pll_shift = 0;
+		r->tx_keyed = 0;
 		r->flash_cycle = r->flash_mode = 0;
 		hc16z1_reset(&r->chip);
 	}
@@ -437,7 +440,8 @@ mdr150_step(mdr150 *r)
 int
 mdr150_run(mdr150 *r, double s)
 {
-	uint64_t end = r->chip.clk + (uint64_t)(s * 16777216.0);
+	/* rounded up: a request shorter than a clock still runs one step */
+	uint64_t end = r->chip.clk + (uint64_t)ceil(s * 16777216.0);
 	int first = 1;
 	if (!r->powered)
 		return 0;

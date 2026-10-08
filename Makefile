@@ -29,7 +29,7 @@ libr40.so: $(R40_OBJS) r40_api.o
 	$(CC) -shared -o $@ $(R40_OBJS) r40_api.o
 
 libmdr150.so: $(MDR150_OBJS) mdr150_api.o
-	$(CC) -shared -o $@ $(MDR150_OBJS) mdr150_api.o
+	$(CC) -shared -o $@ $(MDR150_OBJS) mdr150_api.o -lm
 
 cpu16tab.h: tools/cpu16tab.py tools/cpu16_ops.json
 	python3 tools/cpu16tab.py > $@
