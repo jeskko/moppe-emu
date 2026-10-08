@@ -237,6 +237,14 @@ r58_load_rom(r58 *m, const char *path)
 	memset(m->rom, 0xff, sizeof(m->rom));
 	size_t n = fread(m->rom, 1, sizeof(m->rom), fp);
 	fclose(fp);
+	/* L8M: a 64 KB image is EPROM0 + EPROM1 (the firmware repo's
+	 * make l8m: banks 2 and 1 in EPROM1's halves) */
+	if (m->card == R58_L8M && n > 0x8000) {
+		if (!m->rom1)
+			m->rom1 = malloc(0x20000);
+		memset(m->rom1, 0xff, 0x20000);
+		memcpy(m->rom1, m->rom + 0x8000, 0x8000);
+	}
 	return n > 0 ? 0 : -1;
 }
 
