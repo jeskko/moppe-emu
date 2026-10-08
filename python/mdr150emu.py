@@ -13,6 +13,9 @@ APRS in and out:
 
     r.receive("OH5NXO-1>APRS:>hello")  # AFSK into the receiver
     r.transmitted()                    # TNC2 text of frames it sent
+
+Symbols for breakpoints and dis(): Radio(img, symbols=load_syms(path)),
+path = the firmware repo's build/hamdr/hamdr.sym (tools/hc16/hamdr.sh).
 """
 import ctypes as C
 import os
@@ -333,6 +336,17 @@ class Radio:
             lines.append("%05X %-20s %s" % (addr, s or "", text))
             addr += ln
         return "\n".join(lines)
+
+
+def load_syms(path):
+    """symbols from build/hamdr/hamdr.sym of the firmware repo
+    (tools/hc16/hamdr.sh): local labels too, "AAAAA name" per line"""
+    sym = {}
+    for line in open(path, encoding="latin-1"):
+        p = line.split()
+        if len(p) == 2:
+            sym.setdefault(p[1], int(p[0], 16))
+    return sym
 
 
 def load_map(path):
