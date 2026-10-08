@@ -90,6 +90,37 @@ class Console(unittest.TestCase):
         r.run(0.3)
         self.assertIn("OH0EMU-7", cmd(r, "disp"))
 
+    def test_dtr_selects_command_mode(self):
+        """with valid parameters, HaMDR runs its command mode (echo,
+        prompt) only if DTR on port 1 is on when it starts; without,
+        commands still run, silently.  DTR rises 50 ms after power-on,
+        past the bootstrap's own check (which would wait for S-records)"""
+        img = configured(["factorydefaults"])
+        outs = []
+        for dtr in (False, True):
+            r = Radio(img, power=False)
+            r.power(True)
+            r.run(0.05)
+            r.lines(0, dtr=dtr)
+            r.run(1.0)
+            r.serial_text()
+            outs.append(cmd(r, "version"))
+        self.assertNotIn("hamdr $", outs[0])
+        self.assertIn("HaMDR 174", outs[0])
+        self.assertTrue(outs[1].startswith("version\r\n"), outs[1])     # echoed
+        self.assertTrue(outs[1].rstrip().endswith("hamdr $"), outs[1])
+
+    def test_dtr_stops_operation(self):
+        """the digipeater configuration does not beacon in command mode"""
+        img = configured(DIGI)
+        r = Radio(img, power=False)
+        r.power(True)
+        r.run(0.05)
+        r.lines(0, dtr=True)
+        r.run(4)
+        self.assertEqual(r.transmitted(), [])
+        self.assertTrue(r.serial_text().rstrip().endswith("hamdr $"))
+
 
 @unittest.skipIf(IMAGE is None, IMAGE is None and WHY)
 class Aprs(unittest.TestCase):

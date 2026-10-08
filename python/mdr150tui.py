@@ -21,7 +21,15 @@ Keys:  typing goes to the radio's serial port 1 (its console)
        Ctrl-B  a beacon from a station near the radio, with WIDE1-1
        Ctrl-F  the same from a far station (outside digi_area)
        Ctrl-K  prompt: a packet sent to the radio as KISS on port 1
-       Ctrl-D  toggle DTR on port 1     Ctrl-R  power-cycle the radio
+       Ctrl-D  toggle DTR on port 1 and power-cycle: command mode / operating
+       Ctrl-R  power-cycle the radio
+
+DTR on port 1 is HaMDR's mode switch, read when it starts (the
+programming cable has it, the operating cable not): with DTR, or with
+defaulted parameters, it runs its command mode with echo and prompt and
+the radio does not operate; without, the personality runs (beacons,
+digipeating, KISS) and the console still executes commands but neither
+echoes nor prompts.  DTR is off by default; --dtr starts with it on.
        Ctrl-W  save the flash (--flash) Ctrl-X  quit
 
 --script runs headless, no curses.  ';'-separated tokens:
@@ -60,7 +68,7 @@ PRESETS = {
 HELP = [
     "/rssi N      RSSI on the ADC (0..1023)       /busy 0|1   BUSY line",
     "/audio N     RX audio peak, ADC counts       /noise N    noise without signal",
-    "/dtr 0|1     DTR on port 1                   /rts 0|1    RTS on port 1",
+    "/dtr 0|1     DTR on port 1 (read at start)   /rts 0|1    RTS on port 1",
     "/kiss TNC2   send a KISS frame on port 1     /speed X    x real time (0 = max)",
     "/near /far   canned beacons                  /if MHz     RX IF offset shown",
     "/save [FILE] write the flash                 /reboot     power-cycle",
@@ -89,7 +97,7 @@ class Session:
                 img = roms.flash_image()
             except roms.Unavailable as e:
                 sys.exit(str(e))
-        self.r = Radio(img)
+        self.r = Radio(img, power=False)
         self.console = [""]
         self.col = 0                   # cursor column in the last console line
         self.log = []                  # (time, tag, text)
@@ -97,13 +105,15 @@ class Session:
         self.on_air = None
         self.kiss_buf = bytearray()
         self.kiss_in = False
-        self.dtr = self.rts = False
+        self.dtr = getattr(args, "dtr", False)
+        self.rts = False
         self.if_mhz = 21.4
         self.speed = 1.0
         self.seq = 0
         self.msg = ""
         self.tx_on_at = None
         self.counts = {"rf in": 0, "rf out": 0}
+        self.power_on()
         if args.preset:
             self.preset(args.preset)
 
@@ -119,6 +129,18 @@ class Session:
         self.reboot()
         self.msg = "preset %s saved with perm, radio rebooted" % name
 
+    def power_on(self):
+        """power on as a terminal program would see it: DTR rises 50 ms
+        after the supply.  OH5NXO's bootstrap reads DTR in its first
+        milliseconds and would wait 10 s for S-records with it asserted
+        (the Comarco loader it stands in for does not look at DTR); HaMDR
+        reads it at its start, and runs its command mode (echo, prompt)
+        only with DTR or with defaulted parameters"""
+        self.r.lines(0, dtr=False, rts=self.rts)
+        self.r.power(True)
+        self.r.run(0.05)
+        self.set_lines()
+
     def type(self, text):
         self.r.send(text + "\r")
 
@@ -129,10 +151,10 @@ class Session:
         img = self.r.flash()
         self.r.power(False)
         self.r.load_flash(img)
-        self.r.power(True)
+        self.power_on()
         self.rfq.clear()
         self.on_air = None
-        self.log_add("--", "power cycled")
+        self.log_add("--", "power cycled, DTR %s" % ("on" if self.dtr else "off"))
 
     def set_lines(self):
         self.r.lines(0, dtr=self.dtr, rts=self.rts)
@@ -198,6 +220,8 @@ class Session:
             elif cmd == "dtr":
                 self.dtr = int(arg) != 0
                 self.set_lines()
+                self.msg = "DTR %s: takes effect at the next start (/reboot)" % (
+                    "on" if self.dtr else "off")
             elif cmd == "rts":
                 self.rts = int(arg) != 0
                 self.set_lines()
@@ -432,7 +456,9 @@ def draw(stdscr, s):
         attr = curses.A_BOLD if line[8:13].strip() in ("<rf", "<kiss") else 0
         put(y0 + 1 + i, lw + 1, line, attr)
     # bottom
-    bar = s.msg or "^A packet/command  ^B near beacon  ^F far  ^K KISS  ^D DTR  ^R reboot  ^W save  ^X quit"
+    hint = ("[command mode: DTR on] " if s.dtr else
+            "[operating: no echo/prompt; ^D for command mode] ")
+    bar = s.msg or hint + "^A packet/command  ^B near beacon  ^F far  ^K KISS  ^D DTR  ^R reboot  ^W save  ^X quit"
     put(h - 1, 0, bar[:w - 1], curses.A_REVERSE)
     stdscr.refresh()
 
@@ -471,8 +497,9 @@ def main(stdscr, s):
                 s.canned(far=True)
             elif ch == "\x04":
                 s.dtr = not s.dtr
-                s.set_lines()
-                s.msg = "DTR %s" % ("on" if s.dtr else "off")
+                s.reboot()
+                s.msg = ("DTR on, power cycled: HaMDR command mode (radio not operating)"
+                         if s.dtr else "DTR off, power cycled: radio operating, console silent")
             elif ch == "\x12":
                 s.reboot()
             elif ch == "\x17":
@@ -543,6 +570,9 @@ if __name__ == "__main__":
     ap.add_argument("--audio", type=int, default=300, help="RX audio peak in ADC counts (300)")
     ap.add_argument("--noise", type=int, default=150, help="RX noise peak without signal (150)")
     ap.add_argument("--busy", action="store_true", help="BUSY line on")
+    ap.add_argument("--dtr", action="store_true",
+                    help="DTR on port 1 from the start: HaMDR's command mode (echo, prompt);"
+                         " the radio does not operate (no beacons, digipeating, KISS)")
     ap.add_argument("--script", help="headless: ';'-separated tokens, print the result")
     a = ap.parse_args()
     sess = Session(a)
@@ -551,6 +581,8 @@ if __name__ == "__main__":
     sess.r.set_busy(a.busy)
     if a.script is not None:
         run_script(sess, a.script)
+        if a.flash:
+            sess.save()
     else:
         def _quit(signum, frame):
             raise SystemExit(0)
