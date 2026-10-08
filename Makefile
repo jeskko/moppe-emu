@@ -62,6 +62,9 @@ tests/unit/test_cpu16: tests/unit/test_cpu16.c tests/unit/test_cpu16_progs.h cpu
 test-r40: libr40.so
 	python3 -m unittest discover -s tests/r40
 
+test-l8m: libr58.so
+	python3 -m unittest discover -s tests/l8m
+
 test-mdr150: libmdr150.so
 	python3 -m unittest discover -s tests/mdr150
 
@@ -89,4 +92,4 @@ tests/zex/cpm: tests/zex/cpm.c z80.c z80.h
 clean:
 	rm -f *.o r58emu libr58.so libmd5x.so libmc25.so libtmx1.so libr40.so libmdr150.so tests/unit/test_pit tests/unit/test_cdp1802 tests/unit/test_upd7810 tests/unit/test_h8500 tests/unit/test_cpu16 tests/zex/cpm
 
-.PHONY: all test test-md5x test-mc25 test-tmx1 test-r40 test-mdr150 refs zex clean
+.PHONY: all test test-md5x test-mc25 test-tmx1 test-r40 test-mdr150 test-l8m refs zex clean

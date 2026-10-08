@@ -14,7 +14,7 @@ import re
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.environ.get("R58_LIB", os.path.join(HERE, "..", "libr58.so"))
 
-P8E, P8N = 0, 1
+P8E, P8N, L8M = 0, 1, 2
 CU53AN, CU58AF = 0, 1
 AD_RSSI, AD_SQL, AD_BATT, AD_TPC, AD_FPM, AD_RPM, AD_TP4, AD_IN7 = range(8)
 

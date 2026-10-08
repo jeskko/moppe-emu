@@ -5,7 +5,8 @@ radios converted to ham use), for developing and testing their firmware
 without burning EPROMs.
 
 Supported today: the **R58 series** (RB58/RC58/RD58) on P8E and P8N
-processor cards with CU53AN or CU58AF handsets, the **Talkman
+processor cards with CU53AN or CU58AF handsets and the RB58VY's L8M
+logic board, the **Talkman
 MD50/MD59/ME59** (CDP1802/1806) with CU53 or CU59 handsets, the
 **MC25 TVL/PTL** (CDP1802) with its CU41 control unit, and the **Nokia
 TMF-1 / TMN-1** (Talkman 520 / 620, uPD7810) with an HSN-2 or HSF-2
@@ -25,7 +26,7 @@ submodule.
 | Z80 core | `z80.c`: instruction-stepped, exact T-states, undocumented opcodes and flags. Passes zexdoc and zexall (`make zex`). |
 | Chips | Z80 PIO, Z80 SIO (async), Intel 8254, IM2 daisy chain |
 | Handsets | CU53AN (PCF2111 LCDs, shift chain, 74C923 keypad), CU58AF (I²C: PCF8574, PCF8576, PCD3312) |
-| R58 board | `r58.c`: P8E/P8N memory maps incl. the banked ROM window, I/O, ADC/DACs, latches, watchdog, power, FX429 modem at byte level, synthesizer capture, tone pin edges, breakpoints and watchpoints |
+| R58 board | `r58.c`: P8E/P8N memory maps incl. the banked ROM window, and the RB58VY L8M board (EEPROM, one-board I/O map, S8M synth; runs OH5NXO's R58bis for L8M; the original Nokia ROM lacks EPROM1: [notes/r58.md](notes/r58.md)), I/O, ADC/DACs, latches, watchdog, power, FX429 modem at byte level, synthesizer capture, tone pin edges, breakpoints and watchpoints |
 | API | `api.c` flat C API (`libr58.so`); `python/r58emu.py` ctypes harness (`Radio`); `python/r58tui.py` terminal UI; `python/afsk.py` AX.25 decoder |
 | CDP1802 core | `cdp1802.c`: CDP1802 and CDP1806 (68xx instructions, counter/timer), exact machine cycles. Unit test, no exerciser |
 | Talkman board | `md5x.c`: MD50/MD59/ME59 memory maps, output latches, 4021 inputs, MAS7205 modem (100 Hz timer interrupt), synth capture, watchdog, ME59 ADC/DAC/8253; `md5x_api.c` (`libmd5x.so`), `python/md5xemu.py` harness, `python/md5xtui.py` terminal UI. Boots OH3NWQ mx5x v3.183 and OH1E #42 on all three models: [notes/md5x.md](notes/md5x.md) |
@@ -50,6 +51,7 @@ make test-mc25  # MC25 scenarios
 make test-tmx1  # TMF-1/TMN-1 scenarios
 make test-r40   # R40 scenarios (original Nokia firmware)
 make test-mdr150 # MDR150 scenarios (HaMDR 174)
+make test-l8m   # RB58VY L8M board (OH5NXO's R58bis, Nokia EPROM0)
 make zex        # Z80 exerciser (zexdoc, from the ZEXALL submodule), ~75 s
 ```
 
@@ -77,12 +79,13 @@ hash of what was published on 2026-10-02:
 | `r58p8x3Z.bin.als`, `r58.asm.als`: R58 v3_Z ALs by OH1E / OH5NXO | titanix.net/DMR/r58/ | no licence given |
 | `rc40_rom/ABSBIN`: original Nokia RC40 firmware Cr 13.04-0 (1993), streamed out of OH5NXO's 339 MB archive `oh5nxo.mods.2018.tar.gz` | oh3tr.fi/~ftp/modifications/sorsat/ | Nokia's; for testing only, never redistribute |
 | `MDR150/hamdr/hamdr.hex`, `bootstrap`: HaMDR 174 (2012) and the MDR150 bootstrap (2009) by OH5NXO, from the same archive, in the same pass | oh3tr.fi/~ftp/modifications/sorsat/ | no licence given |
+| `R58vy/rom.0`: original Nokia RB58VY EPROM0; `R58bis/R58/L8M.bin`: OH5NXO's R58bis for L8M (2014), from the same archive, in the same pass | oh3tr.fi/~ftp/modifications/sorsat/ | Nokia's (testing only, never redistribute); OH5NXO's: no licence given |
 
 The assemblers are OH5NXO's "jas", with no licence statement. Fetching a
 file here is the same as downloading it from its author; keep it out of
 anything you publish. A firmware repo checkout next to the emulator
 (`emu/` as its submodule) supplies the same files from its own
-`reference/` instead, and `MD5X_REF` / `MC25_REF` / `TMX1_REF` / `MDR150_REF` point the
+`reference/` instead, and `MD5X_REF` / `MC25_REF` / `TMX1_REF` / `MDR150_REF` / `L8M_REF` point the
 builders anywhere else.
 
 The R58 runs either the firmware repo's build (with its linker map for

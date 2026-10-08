@@ -1,7 +1,7 @@
 /*
  * r58emu - command line front end.
  *
- *   r58emu [-n] [-c cu53|cu58] [-p p8e|p8n] [-v nvfile] rom.bin [seconds]
+ *   r58emu [-n] [-c cu53|cu58] [-p p8e|p8n|l8m] [-v nvfile] rom.bin [seconds]
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,10 +28,11 @@ main(int argc, char **argv)
 	while ((opt = getopt(argc, argv, "c:p:v:")) != -1) {
 		switch (opt) {
 		case 'c': cu = !strcmp(optarg, "cu58") ? R58_CU58AF : R58_CU53AN; break;
-		case 'p': card = !strcmp(optarg, "p8n") ? R58_P8N : R58_P8E; break;
+		case 'p': card = !strcmp(optarg, "p8n") ? R58_P8N :
+		                    !strcmp(optarg, "l8m") ? R58_L8M : R58_P8E; break;
 		case 'v': nv = optarg; break;
 		default:
-			fprintf(stderr, "usage: r58emu [-c cu53|cu58] [-p p8e|p8n] [-v nv] rom [sec]\n");
+			fprintf(stderr, "usage: r58emu [-c cu53|cu58] [-p p8e|p8n|l8m] [-v nv] rom [sec]\n");
 			return 2;
 		}
 	}

@@ -37,6 +37,30 @@
 
 #define PA0_PERIOD 4096		/* xt per 1968.75 Hz cycle */
 
+/* L8M (RB58VY system logic, manual chapter 11 and OH5NXO's iomap_L8M.h):
+ * I/O decoded from A6..A4 only; 0x50 "OUT 0" carries the synthesizer and
+ * handset serial lines, 0x60 "OUT 1" is the P8x OUT0 audio latch */
+#define L_OUT    0x50
+#define L_AUD    0x60
+#define L_WD     0x70
+#define L0_DP    0x01		/* synth SD and handset DP */
+#define L0_CLK   0x02		/* synth and handset CLK */
+#define L0_SRE   0x04		/* RX synth load, rising edge */
+#define L0_STE   0x08		/* TX synth load, falling edge (/STE) */
+#define L0_CS1   0x10
+#define L0_CS2   0x20
+#define L0_TPS   0x40		/* power range */
+#define L0_TXOFF 0x80
+#define LPB_EEA10 0x01		/* EEPROM block (A10) */
+#define LPB_SL    0x10		/* EPROM1 A14 */
+#define LPB_SMEM  0x20		/* 1 RAM, 0 EEPROM at 0xC000 */
+
+/* ADC input n -> r58 AD_ channel: IN0 RSSI, IN1 TPL (FPM), IN2 +V,
+ * IN3 RFC/TPC, IN4 TRPL (RPM), IN5 -, IN6 -, IN7 SQ */
+static const uint8_t l8m_adc[8] = {
+	AD_RSSI, AD_FPM, AD_BATT, AD_TPC, AD_RPM, AD_TP4, AD_IN7, AD_SQL
+};
+
 /* FX429 */
 #define MDM_TXENB 0x01
 #define MDM_RXENB 0x04
@@ -78,6 +102,10 @@ r58_next_event(r58 *m, r58_event *e)
 static inline uint8_t *
 ram_ptr(r58 *m, uint16_t a)
 {
+	/* L8M: SMEM low puts the EEPROM over the whole RAM area; A9..A0 from
+	 * the bus, A10 from PB0 (A11 not used, 2 KB chip) */
+	if (m->card == R58_L8M && !(m->l8m_pb & LPB_SMEM))
+		return &m->eeprom[((m->l8m_pb & LPB_EEA10) << 10) | (a & 0x3ff)];
 	if (m->card == R58_P8N && !(m->out2 & O2_SMEM) && a < R58_NV_BASE + R58_NV_SIZE)
 		return &m->nvplane[a - R58_NV_BASE];
 	return &m->ram[a - 0xC000];
@@ -117,8 +145,12 @@ mem_read(void *ctx, uint16_t a)
 
 	if (a < 0x8000)
 		return m->rom[a];
-	if (a < 0xC000)
+	if (a < 0xC000) {
+		if (m->card == R58_L8M)		/* EPROM1, S/L = its A14 */
+			return m->rom1 ? m->rom1[((m->l8m_pb & LPB_SL) ? 0x4000 : 0) +
+			                         (a & 0x3fff)] : 0xff;
 		return window_read(m, a);
+	}
 	return *ram_ptr(m, a);
 }
 
@@ -149,13 +181,16 @@ r58_poke(r58 *m, uint16_t addr, uint8_t v)
 		*ram_ptr(m, addr) = v;
 }
 
-/* battery-backed block: P8E keeps it in the main RAM chip, P8N in the
- * separate SMEM plane */
-static uint8_t *
-nv_block(r58 *m)
+/* non-volatile block: P8E keeps it in the main RAM chip, P8N in the
+ * separate SMEM plane, L8M in the EEPROM */
+uint8_t *
+r58_nv_block(r58 *m)
 {
+	if (m->card == R58_L8M)
+		return m->eeprom;
 	return m->card == R58_P8N ? m->nvplane : m->ram;
 }
+#define nv_block r58_nv_block
 
 int
 r58_load_nv(r58 *m, const char *path)
@@ -223,7 +258,16 @@ synth_latch(r58 *m, uint8_t strobe)
 		s->ctrl = b & 0xff;
 		s->ctrl_loads++;
 	}
-	if (strobe & (O1_SRE | O1_STE)) {
+	if (m->card == R58_L8M && (strobe & (O1_SRE | O1_STE))) {
+		/* S8M: MC145156, frames SW1 SW2, N (10 bits), A (7 bits);
+		 * R from the RA pins, 1024 as delivered (12.5 kHz at 12.8 MHz;
+		 * OH5NXO r58bis.c load_MC145156) */
+		int tx = !!(strobe & O1_STE);
+		uint32_t nn = (b >> 7) & 0x3ff, a = b & 0x7f;
+		if (tx) { s->tx_r = 1024; s->tx_n = nn; s->tx_a = a; s->tx_loads++; }
+		else    { s->rx_r = 1024; s->rx_n = nn; s->rx_a = a; s->rx_loads++; }
+		s->ctrl = (b >> 17) & 3;
+	} else if (strobe & (O1_SRE | O1_STE)) {
 		int tx = !!(strobe & O1_STE);
 		if (b & 1) {
 			uint32_t r = (b >> 1) & 0x3fff;
@@ -273,6 +317,29 @@ r58_synth_vco_hz(const r58 *m, int tx, int prescaler, double tcxo_hz)
 	if (!r)
 		return -1;
 	return ((double)n * prescaler + a) * tcxo_hz / r;
+}
+
+/* L8M "OUT 0" latch: the P8x OUT1 synth lines and OUT2 handset lines in
+ * one; the CU53 sees CS1/CS2/CLK/DP as on P8x OUT2 bits 4..7 */
+static void
+l8m_out_write(r58 *m, uint8_t v)
+{
+	uint8_t old = m->out1;
+
+	m->out1 = v;
+	if ((v & L0_CLK) && !(old & L0_CLK)) {
+		m->sbits = (m->sbits << 1) | (v & L0_DP);
+		if (m->snbits < 64)
+			m->snbits++;
+	}
+	if (v & ~old & L0_SRE)
+		synth_latch(m, O1_SRE);
+	if (old & ~v & L0_STE)
+		synth_latch(m, O1_STE);
+	if ((old ^ v) & L0_TXOFF)
+		event(m, (v & L0_TXOFF) ? R58_EV_TX_OFF : R58_EV_TX_ON, 0);
+	cu53an_out2(&m->cu53, (v & (L0_CS1 | L0_CS2)) | ((v & L0_CLK) << 5) |
+	                      ((v & L0_DP) << 7));
 }
 
 /* ---------------------------------------------------------------- FX429 */
@@ -366,12 +433,79 @@ modem_write(r58 *m, int reg, uint8_t v)
 static void pit_out(void *ctx, int counter, int level, unsigned off);
 static void pit01_sync(r58 *m);
 
+static void sio_b_clock(r58 *m);
+
+static uint8_t
+l8m_io_read(r58 *m, uint8_t p)
+{
+	int reg = p & 3;
+
+	switch (p & 0x70) {
+	case P_PIO:
+		return reg < 2 ? pio_read_data(&m->pio, reg) : 0xff;
+	case P_SIO:
+		return reg < 2 ? sio_read_data(&m->sio, reg) : sio_read_ctrl(&m->sio, reg - 2);
+	case P_TMR:
+		pit01_sync(m);
+		return pit_read(&m->pit, reg);
+	case 0x40:
+		return m->adc_result;
+	}
+	return 0xff;
+}
+
+static void
+l8m_io_write(r58 *m, uint8_t p, uint8_t v)
+{
+	int reg = p & 3;
+
+	switch (p & 0x70) {
+	case P_PIO:
+		if (reg < 2)
+			pio_write_data(&m->pio, reg, v);
+		else
+			pio_write_ctrl(&m->pio, reg - 2, v);
+		update_lines(m);
+		break;
+	case P_SIO:
+		if (reg < 2)
+			sio_write_data(&m->sio, reg, v);
+		else
+			sio_write_ctrl(&m->sio, reg - 2, v);
+		break;
+	case P_TMR:
+		pit01_sync(m);
+		pit_write(&m->pit, reg, v);
+		sio_b_clock(m);
+		break;
+	case 0x30:			/* one DAC: TPC (also RFC) */
+		m->da_rfc = m->da_txpwr = v;
+		break;
+	case 0x40:
+		m->adc_result = m->adc[l8m_adc[p & 7]];
+		break;
+	case L_OUT:
+		l8m_out_write(m, v);
+		update_lines(m);
+		break;
+	case L_AUD:
+		m->out0 = v;
+		break;
+	case L_WD:
+		m->wd_last = m->now;
+		break;
+	}
+}
+
 static uint8_t
 io_read(void *ctx, uint16_t port)
 {
 	r58 *m = ctx;
 	uint8_t p = port & 0xff;
 	int reg = p & 3;
+
+	if (m->card == R58_L8M)
+		return l8m_io_read(m, p);
 
 	switch (p & 0xf0) {
 	case P_PIO:
@@ -402,6 +536,11 @@ io_write(void *ctx, uint16_t port, uint8_t v)
 	r58 *m = ctx;
 	uint8_t p = port & 0xff;
 	int reg = p & 3;
+
+	if (m->card == R58_L8M) {
+		l8m_io_write(m, p, v);
+		return;
+	}
 
 	switch (p & 0xf0) {
 	case P_PIO:
@@ -501,8 +640,16 @@ update_lines(r58 *m)
 	if (m->exin1) pb |= 0x02;
 	if (m->exin2) pb |= 0x04;
 	if (dcu)      pb |= 0x08;
-	if (m->tmr0)  pb |= 0x20;
+	if (m->card == R58_L8M)
+		pb |= 0x20;		/* SMEM output, idle RAM */
+	else if (m->tmr0)
+		pb |= 0x20;
 	pio_set_input(&m->pio, 1, pb);
+	if (m->card == R58_L8M) {
+		m->l8m_pb = pio_pins(&m->pio, 1);
+		/* DCDA = /HK: handset in its holder (OH5NXO SA_ONHOOK) */
+		sio_set_status(&m->sio, 0, SIO_RR0_DCD, m->offhook ? 0 : SIO_RR0_DCD);
+	}
 
 	/* power relay: PB7 driven high drops it */
 	if ((pb_drv & 0x80) && (pb_out & 0x80) && m->powered) {
@@ -521,7 +668,9 @@ set_pa(r58 *m, int pa0)
 	uint8_t pa = (m->ccir_nibble & 0x0f) << 4;
 	if (pa0)
 		pa |= 0x01;
-	if ((m->offhook ? m->hook_offhook_level : !m->hook_offhook_level))
+	if (m->card == R58_L8M)
+		pa |= 0x02;		/* SLOCK: TX synthesizer locked */
+	else if ((m->offhook ? m->hook_offhook_level : !m->hook_offhook_level))
 		pa |= 0x02;
 	pa |= 0x04;			/* WDR: unused, idle high */
 	if (!m->power_on)
@@ -587,6 +736,8 @@ pit01_sync(r58 *m)
 		unsigned k = n > 0x40000000u ? 0x40000000u : (unsigned)n;
 		pit_clock(&m->pit, 0, k);
 		pit_clock(&m->pit, 1, k);
+		if (m->card == R58_L8M)
+			pit_clock(&m->pit, 2, k);
 		n -= k;
 	}
 }
@@ -602,7 +753,7 @@ pit_out(void *ctx, int counter, int level, unsigned off)
 {
 	r58 *m = ctx;
 
-	if (counter != 1 || !m->aud_cap || m->aud_n >= m->aud_cap)
+	if (counter != m->tone_ctr || !m->aud_cap || m->aud_n >= m->aud_cap)
 		return;
 	/* called from advance() before `now` moves: offset is in CLK1
 	 * periods (2 xt) from the start of the batch */
@@ -627,7 +778,11 @@ r58_audio_capture(r58 *m, unsigned capacity)
 		if (m->aud_t && m->aud_v)
 			m->aud_cap = capacity;
 	}
-	m->pit.quiet = m->aud_cap ? 1u : 3u;	/* counter 0 never watched */
+	/* only the tone counter is ever watched */
+	if (m->card == R58_L8M)
+		m->pit.quiet = m->aud_cap ? 3u : 7u;
+	else
+		m->pit.quiet = m->aud_cap ? 1u : 3u;
 }
 
 unsigned
@@ -640,6 +795,16 @@ r58_audio_take(r58 *m, uint64_t *t, uint8_t *v, unsigned max)
 	memmove(m->aud_v, m->aud_v + n, m->aud_n - n);
 	m->aud_n -= n;
 	return n;
+}
+
+/* L8M: SIO B (MBUS) clock on TXRXCB is 8254 OUT0 (155 kHz in the manual) */
+static void
+sio_b_clock(r58 *m)
+{
+	pit_counter *c = &m->pit.c[0];
+
+	if (!c->null)
+		m->sio.clock_hz[1] = 4032000.0 / (c->cr ? c->cr : 0x10000);
 }
 
 /* ---------------------------------------------------------------- reset */
@@ -685,6 +850,7 @@ r58_init(r58 *m, int card, int cu)
 	m->cu = cu;
 	m->wd_timeout_s = 0.52;	/* 74HC4040 at 1968.75 Hz (service manual p86) */
 	m->m1_wait = card == R58_P8E ? 1 : 0;
+	m->tone_ctr = card == R58_L8M ? 2 : 1;
 	m->hook_offhook_level = 1;	/* assumed: PA1 = 1 lifted (notes) */
 	m->power_on = 1;
 	m->powered = 1;
@@ -715,7 +881,7 @@ r58_init(r58 *m, int card, int cu)
 	}
 	m->pit.out_changed = pit_out;
 	m->pit.ctx = m;
-	m->pit.quiet = 3;			/* no audio capture */
+	m->pit.quiet = card == R58_L8M ? 7 : 3;	/* no audio capture */
 	pit_init(&m->pit);
 	cu53an_init(&m->cu53);
 	cu58af_init(&m->cu58);
@@ -785,7 +951,7 @@ r58_set_hook(r58 *m, int offhook)
 	m->offhook = !!offhook;
 	m->cu58.offhook = m->offhook;
 	set_pa(m, (m->now % PA0_PERIOD) < PA0_PERIOD / 2);
-	if (changed)
+	if (changed && m->card != R58_L8M)
 		modem_irq(m);	/* DCDA is shared: hook, 8254 OUT2, FX429 */
 	update_lines(m);
 }
@@ -845,7 +1011,8 @@ advance(r58 *m, uint64_t dt)
 	uint64_t ph1 = ph0 + dt;
 	if (ph0 < PA0_PERIOD / 2 && ph1 >= PA0_PERIOD / 2) {
 		set_pa(m, 0);				/* falling edge */
-		pit_clock(&m->pit, 2, 1);		/* 8254 counts on falling CLK */
+		if (m->card != R58_L8M)
+			pit_clock(&m->pit, 2, 1);	/* 8254 counts on falling CLK */
 	}
 	if (ph1 >= PA0_PERIOD)
 		set_pa(m, 1);				/* rising edge */
@@ -858,6 +1025,8 @@ advance(r58 *m, uint64_t dt)
 		if (clocks) {
 			pit_clock(&m->pit, 0, clocks);
 			pit_clock(&m->pit, 1, clocks);
+			if (m->card == R58_L8M)
+				pit_clock(&m->pit, 2, clocks);
 		}
 	} else
 		m->pit01_pending += clocks;
@@ -926,6 +1095,10 @@ r58_run(r58 *m, double seconds)
 			next_slow = m->now + 160;
 			serial_tick(m);
 			modem_tick(m);
+			/* L8M: grounding LOCAL (service mode) stops the
+			 * watchdog (manual chapter 11) */
+			if (m->card == R58_L8M && m->local)
+				m->wd_last = m->now;
 			if (m->now - m->wd_last > wd_xt) {
 				event(m, R58_EV_WDRESET, m->cpu.pc);
 				hw_reset(m);

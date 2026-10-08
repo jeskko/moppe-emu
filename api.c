@@ -55,7 +55,7 @@ r58api_write(r58 *m, int addr, int n, const uint8_t *in)
 void
 r58api_nv(r58 *m, uint8_t *out, const uint8_t *in)
 {
-	uint8_t *nv = m->card == R58_P8N ? m->nvplane : m->ram;
+	uint8_t *nv = r58_nv_block(m);
 	if (out)
 		memcpy(out, nv, R58_NV_SIZE);
 	if (in)

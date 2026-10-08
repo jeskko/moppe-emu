@@ -1,6 +1,7 @@
 /*
  * Mobira R58 (RB58/RC58/RD58) logic board emulation: P8N or P8E CPU card,
- * A8N audio card, CU53AN or CU58AF handset.
+ * A8N audio card, CU53AN or CU58AF handset; or the RB58VY's L8M system
+ * logic board (one board, EEPROM for NV, FX419 on the SIO) with a CU53.
  *
  * Time is kept in "xt" units = periods of the 8.064 MHz crystal.  P8E runs
  * the Z80 at 8.064 MHz with one wait state per M1 cycle; P8N at 4.032 MHz
@@ -24,7 +25,7 @@
 #define R58_NV_BASE   0xC000
 #define R58_NV_SIZE   4096
 
-enum { R58_P8E, R58_P8N };
+enum { R58_P8E, R58_P8N, R58_L8M };
 enum { R58_CU53AN, R58_CU58AF };
 
 /* ADC channels */
@@ -82,11 +83,13 @@ typedef struct r58_event {
 
 typedef struct r58 {
 	/* configuration */
-	int      card;			/* R58_P8E / R58_P8N */
+	int      card;			/* R58_P8E / R58_P8N / R58_L8M */
 	int      cu;			/* R58_CU53AN / R58_CU58AF */
 	double   wd_timeout_s;		/* watchdog timeout */
 	int      hook_offhook_level;	/* PA1 level meaning handset lifted */
 	int      m1_wait;		/* wait states per M1 (P8E 1, P8N 0) */
+	int      tone_ctr;		/* 8254 counter on the tone pin (P8x 1,
+					 * L8M 2) */
 
 	/* chips */
 	z80      cpu;
@@ -102,6 +105,7 @@ typedef struct r58 {
 	uint8_t *rom1;			/* EPROM1: 27C010, 8 x 16 KB banks, or NULL */
 	uint8_t  ram[0x4000];
 	uint8_t  nvplane[R58_NV_SIZE];	/* P8N SMEM=0 plane */
+	uint8_t  eeprom[R58_NV_SIZE];	/* L8M NMC9817, 2 KB used */
 
 	/* latches and converters */
 	uint8_t  out0, out1, out2, csmem;
@@ -109,6 +113,7 @@ typedef struct r58 {
 	uint8_t  adc[8];		/* analog inputs, 0..255 */
 	uint8_t  adc_result;
 	uint8_t  multiboard;		/* value read at 0x80xx */
+	uint8_t  l8m_pb;		/* L8M: PIO B pins (EEA10, S/L, SMEM) */
 
 	/* inputs */
 	uint8_t  power_on;		/* power switch */
@@ -125,8 +130,9 @@ typedef struct r58 {
 	/* time */
 	uint64_t now;			/* xt */
 	uint64_t pit01_rem;		/* xt carry for CLK0/1 (div 2) */
-	uint64_t pit01_pending;		/* CLK0/1 clocks not yet given to the
-					 * 8254 (r58.c pit01_sync) */
+	uint64_t pit01_pending;		/* CLK0/1 (L8M: also CLK2) clocks not
+					 * yet given to the 8254 (r58.c
+					 * pit01_sync) */
 	uint64_t cpu_cycles;		/* T-states including waits */
 	uint64_t instructions;
 
@@ -175,9 +181,12 @@ typedef struct r58 {
 /* lifecycle */
 void r58_init(r58 *m, int card, int cu);
 int  r58_load_rom(r58 *m, const char *path);	/* EPROM0, up to 64 KB */
-int  r58_load_rom1(r58 *m, const char *path);	/* EPROM1 (P8E), up to 128 KB */
+int  r58_load_rom1(r58 *m, const char *path);	/* EPROM1 (P8E), up to 128 KB;
+						 * L8M: 27C256 at 0x8000 */
 int  r58_load_nv(r58 *m, const char *path);
 int  r58_save_nv(r58 *m, const char *path);
+uint8_t *r58_nv_block(r58 *m);		/* R58_NV_SIZE bytes: P8E RAM, P8N
+					 * plane, L8M EEPROM */
 void r58_power(r58 *m, int on);		/* flip the power switch */
 void r58_reset(r58 *m);			/* hardware reset (power-up) */
 
