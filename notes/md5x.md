@@ -13,7 +13,7 @@ Hardware facts and sources are in the firmware repo's `notes/md5x.md`.
 | Board | `md5x.c` | Memory maps, N0/N1/N2 I/O decode, eight 4-bit output latches (OUT 4, latch from R(X) bits 3..1), 4021 input chain (Q clock, PSC load, /EF3), MAS7205 modem at register level, serial synth capture, watchdog, OFF1 power-off, ME59 ADC/DAC/8253, MD50 WAIT (N0) |
 | Handset | `cu53an.c` | Same chain/LCD protocol as the R58 CU53AN; parallel-load bit 1 (`bit1`) is the Talkman D5 key bit, idle 1 on CU53, 0 on CU59 |
 | API | `md5x_api.c` → `libmd5x.so`; `python/md5xemu.py`; `python/md5xtui.py` (curses, or `--script` headless) | `Radio(rom, listing, model, cu)`; as06 listing symbols; LCD text decoded with the ROM's own `font` table |
-| Tests | `tests/md5x/` | `roms.py` builds six firmware images from the reference sources with as06; `test_md5x.py` (13 scenarios). Skip if the sources or a 32-bit runtime are missing |
+| Tests | `tests/md5x/` (`make test-md5x`) | `roms.py` builds six firmware images from the reference sources (`make refs`, or the firmware repo's `reference/md5x/`) with as06; `test_md5x.py` (13 scenarios). Skip if the sources or a 32-bit runtime are missing |
 
 Time is in CPU clock periods (3.6864 MHz MD5x, 4.8 MHz ME59); peripherals
 advance after each instruction.

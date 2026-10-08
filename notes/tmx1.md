@@ -14,7 +14,7 @@ sources: the firmware repo's `notes/tmx1.md`.
 | Radio | `tmx1.c` | NP5SA memory map and paging, serial bus (PLLs, DAC, LFU), 74259, MAS7825 at byte level, i8253 (`pit.c`), watchdog, power logic, the MBUS line, a passive MBUS monitor and a host MBUS transmitter |
 | Handset | `tmx1hs.c` | HSN-2: 74259 pair over the EPROM (keypad rails, LCD /CS and C/D, LEDs), PCD3312 on I2C; HSF-2: keypad rails on PA, HSIC registers 0400-0700; both: two uPD7228 LCD controllers, keypad edges on AN4-AN7, POWERSW, hook |
 | API | `tmx1_api.c` → `libtmx1.so`; `python/tmx1emu.py`; `python/upd7810dis.py` (as7810-syntax disassembler); `python/tmx1tui.py` | `Radio(rom, lst, hs_rom=, handset="HSN2"/"HSF2")`; `handset=None`: the host plays the handset over MBUS |
-| Tests | `tests/tmx1/` | `roms.py` builds the four images with as7810 from `tmx1_v50.zip`; `test_tmx1.py` (16 scenarios); `test_encodings.py` assembles every instruction form of as7810's grammar and checks the disassembler's text and the core's lengths against it |
+| Tests | `tests/tmx1/` (`make test-tmx1`) | `roms.py` (sources via `make refs`) builds the four images with as7810 from `tmx1_v50.zip`; `test_tmx1.py` (16 scenarios); `test_encodings.py` assembles every instruction form of as7810's grammar and checks the disassembler's text and the core's lengths against it |
 
 Both units run at 11.0592 MHz. Time is radio clocks; the scheduler steps
 whichever CPU is behind, so the two stay within one instruction. The

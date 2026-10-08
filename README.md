@@ -11,15 +11,15 @@ MD50/MD59/ME59** (CDP1802/1806) with CU53 or CU59 handsets, the
 **MC25 TVL/PTL** (CDP1802) with its CU41 control unit, and the **Nokia
 TMF-1 / TMN-1** (Talkman 520 / 620, uPD7810) with an HSN-2 or HSF-2
 handset running its own firmware, and the **Nokia R40** (RC40/RD40,
-Hitachi H8/532) running its original Nokia firmware with a CU43 control
-head, and the **Comarco MDR150** data radio (68HC16Z1) running OH5NXO's
+Hitachi H8/532) running its original Nokia firmware or the firmware
+repo's ham firmware with a CU43 control head, and the **Comarco MDR150** data radio (68HC16Z1) running OH5NXO's
 HaMDR ham firmware.
 
 The firmware it was built for, and its scenario and differential tests,
 live in the firmware repo (`moppe`), which has this repo as the `emu/`
 submodule.
 
-## Status (2026-10-05)
+## Status (2026-10-09)
 
 | Area | State |
 |---|---|
@@ -33,7 +33,7 @@ submodule.
 | MC25 board | `mc25.c`, `cu41.c`: KL1 ports, 1 ms interrupt, CU41 display and keypad, CCIR at digit level, soft-UART; `mc25_api.c` (`libmc25.so`), `python/mc25emu.py`, `python/mc25tui.py`. Runs OH5NXO/OH3NWQ mc25.asm v3.6: [notes/mc25.md](notes/mc25.md) |
 | uPD7810 core | `upd7810.c`: uPD7810/78C10 instruction set with data-sheet state counts, timers, event counter, async serial, A/D, edge flags, interrupts. Unit test; decoder checked against as7810 on every instruction form |
 | H8/500 core | `h8500.c` (maximum mode) and `h8532.c` (H8/532 ports, FRT1-3, 8-bit timer, SCI, A/D, WDT, interrupt controller). Unit test |
-| R40 | `r40.c`: L100 logic board (latches, serial bus, PLLs, PCF8584, FX429 at byte level) and CU43 control head (PCF8574 keypad, PCF8578/79 LCD, 24C02 service key); `r40_api.c` (`libr40.so`), `python/r40emu.py`. Boots the RC40 firmware Cr 13.04 to its self test and error display, and into the LOCAL service mode with a service head: [notes/r40.md](notes/r40.md) |
+| R40 | `r40.c`: L100 logic board (latches, serial bus, PLLs, PCF8584, FX429 at byte level) and CU43 control head (PCF8574 keypad, PCF8578/79 LCD, 24C02 service key); `r40_api.c` (`libr40.so`), `python/r40emu.py`. Boots the RC40 firmware Cr 13.04 to its self test and error display, and into the LOCAL service mode with a service head; `python/r40nv.py` builds a set-up NV image through the service mode; optional RX front-end model (RSSI vs RFC). Runs the firmware repo's ham firmware (2 m and 70 cm; `python/r40tui.py` defaults to it, `--factory` for Nokia's): [notes/r40.md](notes/r40.md) |
 | CPU16 core | `cpu16.c` with `cpu16tab.h` generated from the Reference Manual's instruction table (`tools/cpu16tab.py`): whole instruction set incl. the MAC unit, manual clock counts plus bus-access cost. Unit test with hc16-assembled programs; `python/cpu16dis.py` |
 | MDR150 | `hc16z1.c` (SIM chip selects, ports, PIT, watchdog, standby RAM, GPT with PWM, QSM SCI, ADC), `mdr150.c` (Am29F010, RAM, 4094 + MB1504 radio module, AFSK audio in/out, serial mux); `mdr150_api.c` (`libmdr150.so`), `python/mdr150emu.py`, `python/mdr150tui.py` (serial console, radio state, AX.25 log, APRS packets on the air on demand). Runs OH5NXO's HaMDR 174: console, config to flash, APRS beacon out, AFSK in, digipeating, KISS: [notes/mdr150.md](notes/mdr150.md) |
 | TMx-1 | `tmx1.c` radio unit (PLLs, DAC, LFU, 8253, modem at byte level, watchdog, power), `tmx1hs.c` HSN-2 / HSF-2 handsets (uPD7228 LCDs, keypad, LEDs, DTMF), bit-level MBUS between the two CPUs; `tmx1_api.c` (`libtmx1.so`), `python/tmx1emu.py`, `python/tmx1tui.py`, `python/upd7810dis.py`. Runs OH5NXO/OH3NWQ tmx1.asm v5.0 with HSN-2 v1.6 / HSF-2 v0.2: [notes/tmx1.md](notes/tmx1.md) |
@@ -142,17 +142,19 @@ print(r.display(), r.vco_hz())     # ('    30 2', '  433550', ' 0') 454950000.0
 | `cdp1802.c` | CDP1802/1806 core |
 | `pio.c`, `sio.c`, `pit.c`, `daisy.c` | Zilog/Intel chips |
 | `cu53an.c`, `cu58af.c` | Handsets |
-| `r58.c` | R58 board |
+| `r58.c` | R58 boards: P8E, P8N, L8M |
 | `md5x.c`, `md5x_api.c` | Talkman MD50/MD59/ME59 board, its flat API |
 | `mc25.c`, `cu41.c`, `mc25_api.c` | MC25 TVL/PTL board, CU41 control unit, flat API |
 | `upd7810.c` | uPD7810 / uPD78C10 core |
 | `tmx1.c`, `tmx1hs.c`, `tmx1_api.c` | TMF-1/TMN-1 radio unit and MBUS, HSN-2/HSF-2 handsets, flat API |
 | `h8500.c`, `h8532.c`, `r40.c`, `r40_api.c` | H8/500 core, H8/532 on-chip modules, R40 L100 board and CU43, flat API |
+| `cpu16.c`, `cpu16tab.h`, `hc16z1.c`, `mdr150.c`, `mdr150_api.c` | CPU16 core and its instruction table, 68HC16Z1 on-chip modules, Comarco MDR150 board, flat API |
 | `api.c`, `main.c` | Flat API, CLI smoke run (`r58emu`) |
-| `python/` | Harnesses (`r58emu.py`, `md5xemu.py`, `mc25emu.py`, `tmx1emu.py`, `r40emu.py`), TUIs (`r58tui.py`, `md5xtui.py`, `mc25tui.py`, `tmx1tui.py`), AFSK decoder, uPD7810 disassembler |
-| `tests/unit/`, `tests/zex/` | 8254, CDP1802 and uPD7810 unit tests, CP/M harness for zexdoc/zexall (`tests/zex/ZEXALL` submodule) |
-| `tests/md5x/`, `tests/mc25/`, `tests/tmx1/`, `tests/r40/` | Talkman, MC25, TMx-1 firmware builders and the R40 ROM finder (`roms.py`), scenarios |
+| `python/` | Harnesses (`r58emu.py`, `md5xemu.py`, `mc25emu.py`, `tmx1emu.py`, `r40emu.py`, `mdr150emu.py`), TUIs (`r58tui.py`, `md5xtui.py`, `mc25tui.py`, `tmx1tui.py`, `r40tui.py`, `mdr150tui.py`), `r40nv.py` (R40 NV image), AFSK decoder, uPD7810 and CPU16 disassemblers |
+| `tests/unit/`, `tests/zex/` | 8254, CDP1802, uPD7810, H8/500 and CPU16 unit tests, CP/M harness for zexdoc/zexall (`tests/zex/ZEXALL` submodule) |
+| `tests/md5x/`, `tests/mc25/`, `tests/tmx1/`, `tests/r40/`, `tests/mdr150/`, `tests/l8m/` | Per radio: the firmware builder or ROM finder (`roms.py`) and the scenarios |
 | `tests/fetch_refs.py` | `make refs`: fetches the test firmware from its authors' sites |
+| `tools/` | `cpu16tab.py` (generates `cpu16tab.h` from `cpu16_ops.json`), `cpu16_parse.py` |
 | `notes/` | Design notes |
 
 Licence: MIT (`LICENSE`). Frank Cringle's Z80 instruction exercisers
