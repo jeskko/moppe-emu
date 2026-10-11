@@ -89,7 +89,25 @@ typedef struct md5x_modem {
 	uint64_t next_tick;	/* 100 Hz timer, CPU clocks */
 	unsigned ticks;
 	uint64_t tx_done;	/* TX shift register empties at this time */
+	/* receiver (ideal FFSK demodulator, bit level) */
+	uint8_t  hunt;		/* HM: looking for the frame sync */
+	uint16_t sync_sr;	/* last 11 received bits */
+	uint8_t  rx_sr, rx_n;	/* byte being assembled after the sync */
+	uint8_t  rx_bytes;	/* bytes delivered since the sync */
 } md5x_modem;
+
+/* the base station's signal: FFSK bits at 1200 bit/s on one channel */
+#define MD5X_AIR 65536
+typedef struct md5x_air {
+	uint8_t  bits[MD5X_AIR];	/* ring; 0/1 */
+	unsigned head, n;	/* oldest bit, bits buffered */
+	uint32_t div;		/* synth divider it is heard on, 0 = none */
+	int      bit;		/* bit on the air now, -1 = carrier off */
+	uint64_t nbits;		/* bit periods since creation */
+	uint64_t bit_start;	/* clock of the current bit */
+	uint64_t next;		/* clock of the next bit boundary */
+	double   phase;		/* FFSK phase (cycles) at bit_start */
+} md5x_air;
 
 #define MD5X_EVQ 1024
 #define MD5X_TRACE 4096
@@ -122,6 +140,7 @@ typedef struct md5x {
 	uint8_t  waiting;	/* MD50 N0: WAIT until /INT */
 
 	md5x_modem modem;
+	md5x_air air;
 	md5x_eeprom ee;
 
 	/* OK 59 / TK 59 programming module on the handset bus (CS3), as the
@@ -183,6 +202,9 @@ void   md5x_key(md5x *m, int code);
 uint8_t md5x_peek(md5x *m, uint16_t a);
 void   md5x_poke(md5x *m, uint16_t a, uint8_t v);
 void   md5x_modem_rx(md5x *m, uint8_t byte);
+/* queue base station bits (0/1); returns how many fitted */
+int    md5x_air_push(md5x *m, const uint8_t *bits, int n);
+void   md5x_air_channel(md5x *m, uint32_t div);
 int    md5x_event_pop(md5x *m, md5x_event *e);
 void   md5x_audio_capture(md5x *m, int on);
 void   md5x_breakpoint(md5x *m, uint16_t a, int on);

@@ -199,3 +199,14 @@ md5xapi_eeprom(md5x *m, uint16_t *out, const uint16_t *in)
 }
 
 void md5xapi_progmodule(md5x *m, const uint8_t *nib, int n) { md5x_progmodule(m, nib, n); }
+
+int  md5xapi_air_push(md5x *m, const uint8_t *b, int n) { return md5x_air_push(m, b, n); }
+void md5xapi_air_channel(md5x *m, int div) { md5x_air_channel(m, (uint32_t)div); }
+int  md5xapi_air_buffered(md5x *m) { return (int)m->air.n; }
+/* ctrl, stat (without the live GPIN bits), hunt */
+void md5xapi_modem_state(md5x *m, int *out)
+{
+	out[0] = m->modem.ctrl;
+	out[1] = m->modem.stat;
+	out[2] = m->modem.hunt;
+}

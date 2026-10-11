@@ -25,6 +25,7 @@
 
 /* modem */
 #define ST_RFLAG 0x01
+#define ST_HM    0x02
 #define ST_TFLAG 0x04
 #define ST_TXE   0x08
 #define ST_CFLAG 0x20
@@ -33,6 +34,8 @@
 #define CT_RINTE 0x01
 #define CT_TINTE 0x02
 #define CT_CINTE 0x04
+#define CT_SHM   0x10
+#define CT_CHM   0x20
 #define CT_CCF   0x40
 #define CT_CRTF  0x80
 
@@ -314,25 +317,115 @@ modem_reset(md5x *m)
 {
 	m->modem.ctrl = 0;
 	m->modem.stat = ST_TFLAG;
+	m->modem.hunt = 1;		/* no bytes before a frame sync */
 	m->modem.tx_done = 0;
 }
+
+static int air_heard(const md5x *m);
 
 static uint8_t
 modem_status(md5x *m)
 {
-	uint8_t s = m->modem.stat & ~(ST_GPIN1 | ST_GPIN2);
+	uint8_t s = m->modem.stat & ~(ST_GPIN1 | ST_GPIN2 | ST_HM);
+	if (m->modem.hunt)
+		s |= ST_HM;
+	int carrier = air_heard(m);
 	if (m->rx_tone_hz > 0) {
 		double t = (double)m->clk / m->cpu_hz;
 		if ((uint64_t)(t * 2.0 * m->rx_tone_hz) & 1)
+			s |= ST_GPIN1;
+	} else if (carrier) {
+		/* clipped FFSK: 1 = one cycle of 1200 Hz, 0 = 1.5 of 1800 Hz */
+		double dt = (double)(m->clk - m->air.bit_start) / m->cpu_hz;
+		double ph = m->air.phase + dt * (m->air.bit ? 1200.0 : 1800.0);
+		if (ph - (double)(uint64_t)ph < 0.5)
 			s |= ST_GPIN1;
 	}
 	if (m->model == MD5X_ME59) {
 		if (m->pit.c[2].out)
 			s |= ST_GPIN2;
-	} else if (m->squelch_open) {
+	} else if (m->squelch_open || carrier) {
 		s |= ST_GPIN2;
 	}
 	return s;
+}
+
+/* the phone is tuned to the base station and it is transmitting */
+static int
+air_heard(const md5x *m)
+{
+	return m->air.div && m->air.bit >= 0 && m->synth.loads &&
+	       m->synth.div == m->air.div;
+}
+
+static void update_int(md5x *m);
+
+/* one bit out of the ideal demodulator */
+static void
+modem_rx_bit(md5x *m, int b)
+{
+	md5x_modem *d = &m->modem;
+	d->sync_sr = (uint16_t)(((d->sync_sr << 1) | b) & 0x7ff);
+	if (d->hunt) {
+		if (d->sync_sr == 0x712) {		/* 11100010010 */
+			d->hunt = 0;
+			d->rx_n = 0;
+			d->rx_bytes = 0;
+		}
+		return;
+	}
+	d->rx_sr = (uint8_t)((d->rx_sr >> 1) | (b << 7));	/* first bit in bit 0 */
+	if (++d->rx_n == 8) {
+		d->rx_n = 0;
+		d->rx = d->rx_sr;
+		d->stat |= ST_RFLAG;
+		/* a frame is 140 bits; the original MD59 firmware takes 19
+		 * bytes per frame (18 stored, one dropped) without setting
+		 * hunt mode again, so the chip goes back to hunting itself */
+		if (++d->rx_bytes == 19)
+			d->hunt = 1;
+		update_int(m);
+	}
+}
+
+int
+md5x_air_push(md5x *m, const uint8_t *bits, int n)
+{
+	int k = 0;
+	for (; k < n && m->air.n < MD5X_AIR; k++, m->air.n++)
+		m->air.bits[(m->air.head + m->air.n) % MD5X_AIR] = bits[k] & 1;
+	return k;
+}
+
+void
+md5x_air_channel(md5x *m, uint32_t div)
+{
+	m->air.div = div;
+}
+
+/* bit boundaries up to now: next bit from the ring (carrier off when it
+ * is empty), into the demodulator while tuned */
+static void
+air_advance(md5x *m)
+{
+	md5x_air *a = &m->air;
+	while (m->clk >= a->next) {
+		if (a->bit >= 0)
+			a->phase += a->bit ? 1.0 : 1.5;
+		a->phase -= (double)(uint64_t)a->phase;
+		a->bit_start = a->next;
+		a->nbits++;
+		a->next = (uint64_t)((double)(a->nbits + 1) * m->cpu_hz / 1200.0);
+		if (a->n) {
+			a->bit = a->bits[a->head];
+			a->head = (a->head + 1) % MD5X_AIR;
+			a->n--;
+		} else {
+			a->bit = -1;
+		}
+		if (air_heard(m))
+			modem_rx_bit(m, a->bit);
+	}
 }
 
 static void
@@ -586,6 +679,12 @@ io_out(void *ctx, int n, uint16_t a, uint8_t v)
 				m->modem.stat &= ~ST_CFLAG;
 			if (v & CT_CRTF)
 				m->modem.stat &= ~ST_RFLAG;
+			if (v & CT_SHM) {		/* new hunt: drop a pending byte */
+				m->modem.hunt = 1;
+				m->modem.stat &= ~ST_RFLAG;
+			}
+			if (v & CT_CHM)
+				m->modem.hunt = 0;
 		} else {
 			m->modem.tx = v;
 			m->modem.stat &= ~ST_TFLAG;
@@ -643,6 +742,8 @@ md5x_init(md5x *m, int model, int cu, unsigned ram_size)
 	m->watch_lo = 1;
 	m->watch_hi = 0;
 	m->modem.next_tick = (uint64_t)(m->cpu_hz / 100);
+	m->air.bit = -1;
+	m->air.next = (uint64_t)(m->cpu_hz / 1200.0);
 	memset(m->ee.word, 0xff, sizeof(m->ee.word));	/* erased */
 	m->ee.dout = 1;
 	board_reset(m);
@@ -752,6 +853,8 @@ advance(md5x *m, unsigned cyc)
 		m->modem.next_tick = (uint64_t)((double)(m->modem.ticks + 1) * m->cpu_hz / 100.0);
 		update_int(m);
 	}
+	if (m->air.div && m->clk >= m->air.next)
+		air_advance(m);
 	if (m->modem.tx_done && m->clk >= m->modem.tx_done) {
 		m->modem.tx_done = 0;
 		m->modem.stat |= ST_TFLAG;

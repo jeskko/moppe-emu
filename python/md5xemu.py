@@ -105,6 +105,10 @@ def lib():
             "md5xapi_eeprom": (None, [vp, C.POINTER(C.c_uint16),
                                       C.POINTER(C.c_uint16)]),
             "md5xapi_progmodule": (None, [vp, C.c_char_p, C.c_int]),
+            "md5xapi_air_push": (C.c_int, [vp, C.c_char_p, C.c_int]),
+            "md5xapi_air_channel": (None, [vp, C.c_int]),
+            "md5xapi_air_buffered": (C.c_int, [vp]),
+            "md5xapi_modem_state": (None, [vp, ip]),
             "md5xapi_coverage": (None, [vp, C.c_char_p, C.c_int]),
             "md5xapi_iolog": (None, [vp, C.c_int, C.c_int]),
             "md5xapi_iolog_take": (C.c_int, [vp, C.c_int,
@@ -298,6 +302,28 @@ class Radio:
         None removes it."""
         nib = bytes(nibbles or ())
         self.L.md5xapi_progmodule(self.m, nib, len(nib))
+
+    # ---- the base station's signal
+
+    def air_channel(self, div):
+        """Synth divider the base station is heard on (0 = none).  While
+        the phone is tuned there and bits are queued: SQ open, GPIN1 the
+        clipped FFSK, bits into the modem's receiver."""
+        self.L.md5xapi_air_channel(self.m, div)
+
+    def air_push(self, bits):
+        """Queue base station bits (1200 bit/s from now on, in order);
+        returns how many fitted."""
+        b = bytes(bits)
+        return self.L.md5xapi_air_push(self.m, b, len(b))
+
+    def air_buffered(self):
+        return self.L.md5xapi_air_buffered(self.m)
+
+    def modem_state(self):
+        out = (C.c_int * 3)()
+        self.L.md5xapi_modem_state(self.m, out)
+        return {"ctrl": out[0], "stat": out[1], "hunt": out[2]}
 
     def coverage(self, clear=False):
         """ROM coverage bitmap (4096 bytes): bit a&7 of byte a>>3 is set
