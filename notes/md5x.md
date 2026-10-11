@@ -13,7 +13,7 @@ Hardware facts and sources are in the firmware repo's `notes/md5x.md`.
 | Board | `md5x.c` | Memory maps, N0/N1/N2 I/O decode, eight 4-bit output latches (OUT 4, latch from R(X) bits 3..1), 4021 input chain (Q clock, PSC load, /EF3), MAS7205 modem at register level, serial synth capture, watchdog, OFF1 power-off, ME59 ADC/DAC/8253, MD50 WAIT (N0) |
 | Handset | `cu53an.c` | Same chain/LCD protocol as the R58 CU53AN; parallel-load bit 1 (`bit1`) is the Talkman D5 key bit, idle 1 on CU53, 0 on CU59 |
 | API | `md5x_api.c` → `libmd5x.so`; `python/md5xemu.py`; `python/md5xtui.py` (curses, or `--script` headless) | `Radio(rom, listing, model, cu)`; as06 listing symbols; LCD text decoded with the ROM's own `font` table |
-| Tests | `tests/md5x/` (`make test-md5x`) | `roms.py` builds six firmware images from the reference sources (`make refs`, or the firmware repo's `reference/md5x/`) with as06; `test_md5x.py` (13 scenarios). `test_md59orig.py` (4): the original Nokia MD59 ROM, see below. Skip if the sources, the dump or a 32-bit runtime are missing |
+| Tests | `tests/md5x/` (`make test-md5x`) | `roms.py` builds six firmware images from the reference sources (`make refs`, or the firmware repo's `reference/md5x/`) with as06; `test_md5x.py` (13 scenarios). `test_md59orig.py` (7): the original Nokia MD59 ROM, see below. Skip if the sources, the dump or a 32-bit runtime are missing |
 | RE aids | `md5x.c`, `python/cdp1802dis.py` | ROM coverage bitmap (`Radio.coverage()`), I/O log of OUT/INP, B/BN flag reads and non-RAM writes with their PC (`iolog()`, `iolog_take()`); disassembler for 1802/1806 that lists covered addresses as code and takes a symbol file |
 
 Time is in CPU clock periods (3.6864 MHz MD5x, 4.8 MHz ME59); peripherals
@@ -29,7 +29,10 @@ advance after each instruction.
 | ME59 | A000 AFC DAC (event), E000-E007 ADC (write starts, read returns the last conversion), 8253 on N0 (CLK0 = TPB, CLK1 = 455 kHz, CLK2 = 19.2 kHz; gates high) | ME59 manual, OH1E `me59_init` |
 | N lines | decoded one per line: N0 (1) MD50 WAIT / ME59 8253, N1 (2) modem, N2 (4) latches | PE2A text, firmware constants HLT/TMR=1, MDM=2, REG=4 |
 | Modem | status RFLAG HM TFLAG TXE FFSK CFLAG GPIN1 GPIN2; control RINTE TINTE CINTE .. CCF CRTF; 100 Hz CFLAG timer; /INT = enabled flags; data byte level | OH5NXO `MAS.registers` (valid for 7205 and 7825), PE2A text |
-| GPIN1 / GPIN2 | clipped RX audio (`set_rx_tone`) / MD5x squelch SQ (`set_squelch`), ME59 8253 OUT2 | PE2A, sources |
+| GPIN1 / GPIN2 | clipped RX audio (`set_rx_tone`, or the FFSK of the base station signal below) / MD5x squelch SQ (`set_squelch`, or that signal heard), ME59 8253 OUT2 | PE2A, sources |
+| Base station signal ("air") | `air_channel(div)`, `air_push(bits)`: bits at 1200 bit/s in emulated time from a ring buffer (carrier off when it is empty), heard while the main synth divider equals `div`: SQ open, GPIN1 = phase-continuous FFSK (1 = one cycle of 1200 Hz, 0 = 1.5 cycles of 1800 Hz), bits into the receiver | NMT FFSK; the original MD59 firmware's scan |
+| Modem receiver | ideal demodulator. Hunt mode (HM, status 0x02) from reset and after SHM, which also drops a pending byte: looks for the frame sync 11100010010, then a byte every 8 bits, **first bit in bit 0**, RFLAG; after 19 bytes back to hunt mode by itself. CHM leaves hunt mode | the original MD59 firmware: its decoder takes the bytes LSB first; its RX interrupt stores 18 bytes and drops the 19th without setting SHM again. Otherwise the MAS7205's behaviour is unknown |
+| Modem transmitter | byte level (TFLAG 8/1200 s after a write); the bytes go out LSB first, as the original MD59's frames decode only that way | MD59 firmware |
 | Inputs | 4021: P8 = DA, then per-model order from the firmware's `input_register`; serial in last; /EF1 DCU, /EF3 Q8, /EF4 /PTT; MD59 /EF2 = RF_OFF | firmware; MD50 polarities match the PE2A text |
 | TOFF | follows XM (no output while XM = 0); `MD5X_IN_TOFF` forces a TX fault | needed by OH1E's `txoff` |
 | PTT | `ptt` input asserts /EF4 and the model's PTT bit (MD50 PC, MD59 AC, ME59 /PTT) | both firmwares' input reads |
@@ -64,6 +67,11 @@ commands program it: `71#` date, `72#` number (Z X1..X6, no password
 field), `73#` lock code, each ended with STO; `81#`-`83#` read them back;
 `90#` leaves LOCAL. Programmed, it boots in NMT mode and scans
 calling channels (synth div = 19375 + channel, about 75 per second).
+With a base station signal (`python/nmtframe.py` builds the frames) it
+camps on a calling channel of its stored area (cold start: country 5,
+area 0). On a combined calling/traffic channel of a new area (51) it
+sends roaming updating seizures (frame 11a) after two scan rounds and
+lights ROAM when nothing answers (`test_md59orig.py`, 7 tests).
 
 ## Known limits
 
@@ -72,7 +80,7 @@ calling channels (synth div = 19375 + channel, about 75 per second).
 | 68xx cycle counts | from the CDP1805 user manual's table as remembered; the Harris data sheet extract in hand has no table. OH1E uses only STPC/LDC/STM/CIE/CID (no timing-critical 68xx) |
 | No CPU exerciser | no zexall equivalent for the 1802; unit tests + firmware runs only |
 | IDL | left on any interrupt request, even with IE = 0 (1802 docs unclear) |
-| FFSK | byte level, no bit timing beyond 1 byte = 8/1200 s for TFLAG; no hunt mode/sync |
+| FFSK | RX at bit level with an ideal demodulator (no noise, no audio); TX at byte level; no audio in or out yet |
 | MD50 PROM A4-A7 | not modelled |
 | 93C06 write time, busy status | writes are instant |
 | 8253 GATE1 (inverted OUT0), OH1E's 455 kHz AFC measurement | gate not modelled |
