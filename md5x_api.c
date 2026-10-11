@@ -210,3 +210,5 @@ void md5xapi_modem_state(md5x *m, int *out)
 	out[1] = m->modem.stat;
 	out[2] = m->modem.hunt;
 }
+
+int  md5xapi_tx_take(md5x *m, uint8_t *out, int max) { return md5x_tx_take(m, out, max); }

@@ -109,6 +109,7 @@ def lib():
             "md5xapi_air_channel": (None, [vp, C.c_int]),
             "md5xapi_air_buffered": (C.c_int, [vp]),
             "md5xapi_modem_state": (None, [vp, ip]),
+            "md5xapi_tx_take": (C.c_int, [vp, C.c_char_p, C.c_int]),
             "md5xapi_coverage": (None, [vp, C.c_char_p, C.c_int]),
             "md5xapi_iolog": (None, [vp, C.c_int, C.c_int]),
             "md5xapi_iolog_take": (C.c_int, [vp, C.c_int,
@@ -312,13 +313,23 @@ class Radio:
         self.L.md5xapi_air_channel(self.m, div)
 
     def air_push(self, bits):
-        """Queue base station bits (1200 bit/s from now on, in order);
-        returns how many fitted."""
+        """Queue base station bits (1200 bit/s from now on, in order; 2 =
+        no carrier for that bit period); returns how many fitted."""
         b = bytes(bits)
         return self.L.md5xapi_air_push(self.m, b, len(b))
 
     def air_buffered(self):
         return self.L.md5xapi_air_buffered(self.m)
+
+    TX_OFF, TX_IDLE = 2, 3
+
+    def tx_take(self, max_n=65536):
+        """The phone's transmitter since the last call, one slot per bit
+        period (1200/s): 0/1 FFSK bit, TX_IDLE carrier without data,
+        TX_OFF no carrier."""
+        buf = C.create_string_buffer(max_n)
+        k = self.L.md5xapi_tx_take(self.m, buf, max_n)
+        return list(buf.raw[:k])
 
     def modem_state(self):
         out = (C.c_int * 3)()

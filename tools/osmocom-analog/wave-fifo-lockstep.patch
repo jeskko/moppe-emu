@@ -1,0 +1,79 @@
+diff --git a/src/libwave/wave.c b/src/libwave/wave.c
+index 57cd7b3..d90bac7 100644
+--- a/src/libwave/wave.c
++++ b/src/libwave/wave.c
+@@ -39,7 +39,7 @@ static void *record_child(void *arg)
+ 		/* how much data is in buffer */
+ 		to_write = (rec->buffer_size + rec->buffer_writep - rec->buffer_readp) % rec->buffer_size;
+ 		if (to_write == 0) {
+-			usleep(10000);
++			usleep(500);
+ 			continue;
+ 		}
+ 		/* only write up to the end of buffer */
+@@ -77,18 +77,17 @@ static void *playback_child(void *arg)
+ 		/* how much space is in buffer */
+ 		to_read = (play->buffer_size + play->buffer_readp - play->buffer_writep - 1) % play->buffer_size;
+ 		if (to_read == 0) {
+-			usleep(10000);
++			usleep(500);
+ 			continue;
+ 		}
+ 		/* only read up to the end of buffer */
+ 		to_end = play->buffer_size - play->buffer_writep;
+ 		if (to_end < to_read)
+ 			to_read = to_end;
+-		/* read */
+-		len = fread(play->buffer + play->buffer_writep, 1, to_read, play->fp);
+-		/* quit on error */
+-		if (len < 0) {
+-			LOGP(DWAVE, LOGL_ERROR, "Failed to read from playback WAVE file! (errno %d)\n", errno);
++		/* LOCAL PATCH (moppe-emu lockstep): read() returns what a FIFO
++		 * has; fread() would wait for the whole free buffer */
++		len = read(fileno(play->fp), play->buffer + play->buffer_writep, to_read);
++		if (len <= 0) {
+ 			play->finish = 1;
+ 			return NULL;
+ 		}
+@@ -96,11 +95,6 @@ static void *playback_child(void *arg)
+ 		play->buffer_writep += len;
+ 		if (play->buffer_writep == play->buffer_size)
+ 			play->buffer_writep = 0;
+-		/* quit on end of file */
+-		if (len != to_read) {
+-			play->finish = 1;
+-			return NULL;
+-		}
+ 	}
+ 
+ 	return NULL;
+@@ -128,6 +122,8 @@ int wave_create_record(wave_rec_t *rec, const char *filename, int samplerate, in
+ 	rec->max_deviation = max_deviation;
+ 
+ 	rec->fp = fopen(filename, "w");
++	if (rec->fp)
++		setvbuf(rec->fp, NULL, _IONBF, 0);	/* LOCAL PATCH: no stdio delay */
+ 	if (!rec->fp) {
+ 		LOGP(DWAVE, LOGL_ERROR, "Failed to open recording file '%s'! (errno %d)\n", filename, errno);
+ 		return -errno;
+@@ -179,6 +175,8 @@ int wave_create_playback(wave_play_t *play, const char *filename, int *samplerat
+ 	play->max_deviation = max_deviation;
+ 
+ 	play->fp = fopen(filename, "r");
++	if (play->fp)
++		setvbuf(play->fp, NULL, _IONBF, 0);	/* LOCAL PATCH: header only, then read() */
+ 	if (!play->fp) {
+ 		LOGP(DWAVE, LOGL_ERROR, "Failed to open playback file '%s'! (errno %d)\n", filename, errno);
+ 		return -errno;
+@@ -388,6 +386,11 @@ read_empty:
+ 		return got;
+ 	}
+ 
++	/* LOCAL PATCH (moppe-emu lockstep): wait for the samples instead of
++	 * padding with zeros, so a FIFO writer paces the whole program */
++	while (!play->finish && ((play->buffer_size + play->buffer_writep - play->buffer_readp) % play->buffer_size) / (2 * play->channels) < length && ((play->buffer_size + play->buffer_writep - play->buffer_readp) % play->buffer_size) / (2 * play->channels) < play->left)
++		usleep(200);
++
+ 	/* how much do we read from buffer */
+ 	to_read = (play->buffer_size + play->buffer_writep - play->buffer_readp) % play->buffer_size;
+ 	to_read /= 2 * play->channels;

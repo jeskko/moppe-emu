@@ -32,7 +32,7 @@ advance after each instruction.
 | GPIN1 / GPIN2 | clipped RX audio (`set_rx_tone`, or the FFSK of the base station signal below) / MD5x squelch SQ (`set_squelch`, or that signal heard), ME59 8253 OUT2 | PE2A, sources |
 | Base station signal ("air") | `air_channel(div)`, `air_push(bits)`: bits at 1200 bit/s in emulated time from a ring buffer (carrier off when it is empty), heard while the main synth divider equals `div`: SQ open, GPIN1 = phase-continuous FFSK (1 = one cycle of 1200 Hz, 0 = 1.5 cycles of 1800 Hz), bits into the receiver | NMT FFSK; the original MD59 firmware's scan |
 | Modem receiver | ideal demodulator. Hunt mode (HM, status 0x02) from reset and after SHM, which also drops a pending byte: looks for the frame sync 11100010010, then a byte every 8 bits, **first bit in bit 0**, RFLAG; after 19 bytes back to hunt mode by itself. CHM leaves hunt mode | the original MD59 firmware: its decoder takes the bytes LSB first; its RX interrupt stores 18 bytes and drops the 19th without setting SHM again. Otherwise the MAS7205's behaviour is unknown |
-| Modem transmitter | byte level (TFLAG 8/1200 s after a write); the bytes go out LSB first, as the original MD59's frames decode only that way | MD59 firmware |
+| Modem transmitter | holding register + shift register on the 1200 bit/s grid: a written byte loads when the shift register is empty (TFLAG then), bits go out **LSB first**; TXE while either is busy. One slot per bit period for the host (`tx_take()`: 0/1, TX_IDLE = XM on without data, TX_OFF) | the original MD59 firmware (its frames decode only LSB first) |
 | Inputs | 4021: P8 = DA, then per-model order from the firmware's `input_register`; serial in last; /EF1 DCU, /EF3 Q8, /EF4 /PTT; MD59 /EF2 = RF_OFF | firmware; MD50 polarities match the PE2A text |
 | TOFF | follows XM (no output while XM = 0); `MD5X_IN_TOFF` forces a TX fault | needed by OH1E's `txoff` |
 | PTT | `ptt` input asserts /EF4 and the model's PTT bit (MD50 PC, MD59 AC, ME59 /PTT) | both firmwares' input reads |
@@ -72,6 +72,11 @@ camps on a calling channel of its stored area (cold start: country 5,
 area 0). On a combined calling/traffic channel of a new area (51) it
 sends roaming updating seizures (frame 11a) after two scan rounds and
 lights ROAM when nothing answers (`test_md59orig.py`, 7 tests).
+Against osmocom-analog's NMT base station (`tools/osmocom-analog/run-nmt.sh`,
+`-k 1 -Y DK,1`), linked in step through FIFOs, it completes a **roaming
+update**: seizure, identity request, identity confirm (password "aaa":
+its K digits are unprogrammed zeros), roaming updating confirmation,
+release, release guard; the phone then shows SERV without ROAM.
 
 ## Known limits
 
@@ -80,7 +85,7 @@ lights ROAM when nothing answers (`test_md59orig.py`, 7 tests).
 | 68xx cycle counts | from the CDP1805 user manual's table as remembered; the Harris data sheet extract in hand has no table. OH1E uses only STPC/LDC/STM/CIE/CID (no timing-critical 68xx) |
 | No CPU exerciser | no zexall equivalent for the 1802; unit tests + firmware runs only |
 | IDL | left on any interrupt request, even with IE = 0 (1802 docs unclear) |
-| FFSK | RX at bit level with an ideal demodulator (no noise, no audio); TX at byte level; no audio in or out yet |
+| FFSK | bit level in the board (ideal demodulator); audio only in the host: `python/ffsk.py` (modulator, non-coherent demodulator), `python/nmtlink.py` links to osmocom-analog through two FIFOs (`tools/osmocom-analog/`). No SAT, no speech, no noise |
 | MD50 PROM A4-A7 | not modelled |
 | 93C06 write time, busy status | writes are instant |
 | 8253 GATE1 (inverted OUT0), OH1E's 455 kHz AFC measurement | gate not modelled |

@@ -88,12 +88,14 @@ typedef struct md5x_modem {
 	uint8_t rx, tx;
 	uint64_t next_tick;	/* 100 Hz timer, CPU clocks */
 	unsigned ticks;
-	uint64_t tx_done;	/* TX shift register empties at this time */
 	/* receiver (ideal FFSK demodulator, bit level) */
 	uint8_t  hunt;		/* HM: looking for the frame sync */
 	uint16_t sync_sr;	/* last 11 received bits */
 	uint8_t  rx_sr, rx_n;	/* byte being assembled after the sync */
 	uint8_t  rx_bytes;	/* bytes delivered since the sync */
+	/* transmitter: holding register and LSB-first shift register on
+	 * the 1200 bit/s grid */
+	uint8_t  tx_hold_full, tx_sr, tx_n;
 } md5x_modem;
 
 /* the base station's signal: FFSK bits at 1200 bit/s on one channel */
@@ -107,7 +109,15 @@ typedef struct md5x_air {
 	uint64_t bit_start;	/* clock of the current bit */
 	uint64_t next;		/* clock of the next bit boundary */
 	double   phase;		/* FFSK phase (cycles) at bit_start */
+	/* what the phone sends, one slot per bit period: 0/1 FFSK bit,
+	 * MD5X_TX_IDLE carrier without data, MD5X_TX_OFF no carrier */
+	uint8_t  tx[MD5X_AIR];
+	unsigned tx_head, tx_n;
+	unsigned tx_lost;	/* slots dropped because the host did not take them */
 } md5x_air;
+
+#define MD5X_TX_OFF  2
+#define MD5X_TX_IDLE 3
 
 #define MD5X_EVQ 1024
 #define MD5X_TRACE 4096
@@ -205,6 +215,8 @@ void   md5x_modem_rx(md5x *m, uint8_t byte);
 /* queue base station bits (0/1); returns how many fitted */
 int    md5x_air_push(md5x *m, const uint8_t *bits, int n);
 void   md5x_air_channel(md5x *m, uint32_t div);
+/* the phone's TX slots since the last call, oldest first */
+int    md5x_tx_take(md5x *m, uint8_t *out, int max);
 int    md5x_event_pop(md5x *m, md5x_event *e);
 void   md5x_audio_capture(md5x *m, int on);
 void   md5x_breakpoint(md5x *m, uint16_t a, int on);

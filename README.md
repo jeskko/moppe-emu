@@ -155,10 +155,11 @@ print(r.display(), r.vco_hz())     # ('    30 2', '  433550', ' 0') 454950000.0
 | `tests/unit/`, `tests/zex/` | 8254, CDP1802, uPD7810, H8/500 and CPU16 unit tests, CP/M harness for zexdoc/zexall (`tests/zex/ZEXALL` submodule) |
 | `tests/md5x/`, `tests/mc25/`, `tests/tmx1/`, `tests/r40/`, `tests/mdr150/`, `tests/l8m/` | Per radio: the firmware builder or ROM finder (`roms.py`) and the scenarios |
 | `tests/fetch_refs.py` | `make refs`: fetches the test firmware from its authors' sites |
-| `tools/` | `cpu16tab.py` (generates `cpu16tab.h` from `cpu16_ops.json`), `cpu16_parse.py` |
+| `tools/` | `cpu16tab.py` (generates `cpu16tab.h` from `cpu16_ops.json`), `cpu16_parse.py`; `osmocom-analog/`: build and run osmocom-analog's NMT base station against the emulated Talkman (`python/nmtlink.py`) |
 | `notes/` | Design notes |
 
-Licence: MIT (`LICENSE`). Frank Cringle's Z80 instruction exercisers
+Licence: MIT (`LICENSE`), except `tools/osmocom-analog/wave-fifo-lockstep.patch`,
+a change to osmocom-analog and like it GPL v3 or later. Frank Cringle's Z80 instruction exercisers
 (zexdoc, zexall; GPL v2) are not part of this repo: `tests/zex/ZEXALL` is
 a submodule of [agn453/ZEXALL](https://github.com/agn453/ZEXALL) (clone
 with `--recursive`, or `git submodule update --init`).

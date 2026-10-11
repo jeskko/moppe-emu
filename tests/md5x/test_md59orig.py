@@ -47,7 +47,11 @@ def base_station(r, channel, prefix, ta):
 
 def decode_tx(data):
     """frames in the modem's TX bytes (LSB first): list of digit strings"""
-    bits = [(b >> k) & 1 for b in data for k in range(8)]
+    return decode_tx_bits([(b >> k) & 1 for b in data for k in range(8)])
+
+
+def decode_tx_bits(bits):
+    bits = [b for b in bits if b in (0, 1)]
     s = "".join(map(str, bits))
     sync = "".join(map(str, nf.BIT_SYNC[-4:] + nf.FRAME_SYNC))
     out, i = [], s.find(sync)

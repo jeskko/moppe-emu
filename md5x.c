@@ -318,7 +318,8 @@ modem_reset(md5x *m)
 	m->modem.ctrl = 0;
 	m->modem.stat = ST_TFLAG;
 	m->modem.hunt = 1;		/* no bytes before a frame sync */
-	m->modem.tx_done = 0;
+	m->modem.tx_hold_full = 0;
+	m->modem.tx_n = 0;
 }
 
 static int air_heard(const md5x *m);
@@ -388,12 +389,54 @@ modem_rx_bit(md5x *m, int b)
 	}
 }
 
+/* one bit period of the transmitter: load the holding register when the
+ * shift register is empty (TFLAG), send LSB first, record the slot */
+static void
+modem_tx_bit(md5x *m)
+{
+	md5x_modem *d = &m->modem;
+	md5x_air *a = &m->air;
+	if (!d->tx_n && d->tx_hold_full) {
+		d->tx_sr = d->tx;
+		d->tx_n = 8;
+		d->tx_hold_full = 0;
+		d->stat |= ST_TFLAG;
+		update_int(m);
+	}
+	uint8_t slot = LBIT(m, O_XM) ? MD5X_TX_IDLE : MD5X_TX_OFF;
+	if (d->tx_n) {
+		if (slot == MD5X_TX_IDLE)
+			slot = d->tx_sr & 1;
+		d->tx_sr >>= 1;
+		if (!--d->tx_n && !d->tx_hold_full)
+			d->stat &= ~ST_TXE;
+	}
+	if (a->tx_n == MD5X_AIR) {
+		a->tx_head = (a->tx_head + 1) % MD5X_AIR;
+		a->tx_n--;
+		a->tx_lost++;
+	}
+	a->tx[(a->tx_head + a->tx_n++) % MD5X_AIR] = slot;
+}
+
+int
+md5x_tx_take(md5x *m, uint8_t *out, int max)
+{
+	md5x_air *a = &m->air;
+	int k = 0;
+	for (; k < max && a->tx_n; k++, a->tx_n--) {
+		out[k] = a->tx[a->tx_head];
+		a->tx_head = (a->tx_head + 1) % MD5X_AIR;
+	}
+	return k;
+}
+
 int
 md5x_air_push(md5x *m, const uint8_t *bits, int n)
 {
 	int k = 0;
 	for (; k < n && m->air.n < MD5X_AIR; k++, m->air.n++)
-		m->air.bits[(m->air.head + m->air.n) % MD5X_AIR] = bits[k] & 1;
+		m->air.bits[(m->air.head + m->air.n) % MD5X_AIR] = bits[k] > 1 ? 2 : bits[k];
 	return k;
 }
 
@@ -417,7 +460,7 @@ air_advance(md5x *m)
 		a->nbits++;
 		a->next = (uint64_t)((double)(a->nbits + 1) * m->cpu_hz / 1200.0);
 		if (a->n) {
-			a->bit = a->bits[a->head];
+			a->bit = a->bits[a->head] > 1 ? -1 : a->bits[a->head];
 			a->head = (a->head + 1) % MD5X_AIR;
 			a->n--;
 		} else {
@@ -425,6 +468,7 @@ air_advance(md5x *m)
 		}
 		if (air_heard(m))
 			modem_rx_bit(m, a->bit);
+		modem_tx_bit(m);
 	}
 }
 
@@ -687,9 +731,9 @@ io_out(void *ctx, int n, uint16_t a, uint8_t v)
 				m->modem.hunt = 0;
 		} else {
 			m->modem.tx = v;
+			m->modem.tx_hold_full = 1;
 			m->modem.stat &= ~ST_TFLAG;
 			m->modem.stat |= ST_TXE;
-			m->modem.tx_done = m->clk + (uint64_t)(m->cpu_hz * 8 / 1200);
 			event(m, MD5X_EV_MODEM_TX, v);
 		}
 		update_int(m);
@@ -853,14 +897,8 @@ advance(md5x *m, unsigned cyc)
 		m->modem.next_tick = (uint64_t)((double)(m->modem.ticks + 1) * m->cpu_hz / 100.0);
 		update_int(m);
 	}
-	if (m->air.div && m->clk >= m->air.next)
+	if (m->clk >= m->air.next)
 		air_advance(m);
-	if (m->modem.tx_done && m->clk >= m->modem.tx_done) {
-		m->modem.tx_done = 0;
-		m->modem.stat |= ST_TFLAG;
-		m->modem.stat &= ~ST_TXE;
-		update_int(m);
-	}
 	if (m->model == MD5X_ME59) {
 		/* CLK0 = TPB, CLK1 = 455 kHz IF (gate not modelled), CLK2 =
 		 * 19.2 kHz from the modem */
