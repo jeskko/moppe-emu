@@ -389,6 +389,19 @@ modem_rx_bit(md5x *m, int b)
 	}
 }
 
+/* record one bit period of the phone's transmitter for the host */
+static void
+air_tx_slot(md5x *m, uint8_t slot)
+{
+	md5x_air *a = &m->air;
+	if (a->tx_n == MD5X_AIR) {
+		a->tx_head = (a->tx_head + 1) % MD5X_AIR;
+		a->tx_n--;
+		a->tx_lost++;
+	}
+	a->tx[(a->tx_head + a->tx_n++) % MD5X_AIR] = slot;
+}
+
 /* one bit period of the transmitter: load the holding register when the
  * shift register is empty (TFLAG), send LSB first, record the slot */
 static void
@@ -396,6 +409,10 @@ modem_tx_bit(md5x *m)
 {
 	md5x_modem *d = &m->modem;
 	md5x_air *a = &m->air;
+	if (!m->powered) {
+		air_tx_slot(m, MD5X_TX_OFF);
+		return;
+	}
 	if (!d->tx_n && d->tx_hold_full) {
 		d->tx_sr = d->tx;
 		d->tx_n = 8;
@@ -411,12 +428,8 @@ modem_tx_bit(md5x *m)
 		if (!--d->tx_n && !d->tx_hold_full)
 			d->stat &= ~ST_TXE;
 	}
-	if (a->tx_n == MD5X_AIR) {
-		a->tx_head = (a->tx_head + 1) % MD5X_AIR;
-		a->tx_n--;
-		a->tx_lost++;
-	}
-	a->tx[(a->tx_head + a->tx_n++) % MD5X_AIR] = slot;
+	(void)a;
+	air_tx_slot(m, slot);
 }
 
 int
@@ -466,7 +479,7 @@ air_advance(md5x *m)
 		} else {
 			a->bit = -1;
 		}
-		if (air_heard(m))
+		if (m->powered && air_heard(m))
 			modem_rx_bit(m, a->bit);
 		modem_tx_bit(m);
 	}
@@ -961,7 +974,10 @@ md5x_run(md5x *m, double seconds)
 	uint64_t end = m->clk + (uint64_t)(seconds * m->cpu_hz);
 	while (m->clk < end) {
 		if (!m->powered) {
+			/* the air goes on: the base station's bits pass by
+			 * unheard, the transmitter's slots say off */
 			m->clk = end;
+			air_advance(m);
 			return MD5X_STOP_OFF;
 		}
 		if (m->nbp && !m->cpu.idle) {

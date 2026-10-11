@@ -1,29 +1,56 @@
 """
-Link an emulated Talkman to osmocom-analog's NMT base station through two
-FIFOs carrying 48 kHz mono WAVE audio: the base station's transmitter
-(osmocom --write-tx-wave) into the phone's receiver, and the phone's
-transmitter into the base station's receiver (--read-rx-wave).
+Link an emulated Talkman to osmocom-analog's NMT base station.  The link
+carries 48 kHz mono audio both ways through two FIFOs: the base
+station's transmitter (osmocom --write-tx-wave) into the phone's
+receiver, and the phone's transmitter into the base station's receiver
+(--read-rx-wave).  osmocom runs in a pseudo-terminal (its console needs
+one), started by this script:
 
-    mkfifo bs_tx.wav bs_rx.wav
-    nmt -k 1 -Y DK,1 -a null --write-tx-wave bs_tx.wav --read-rx-wave bs_rx.wav &
-    python3 nmtlink.py ROM bs_tx.wav bs_rx.wav --eeprom 8123,456F,... --channel 1
+    python3 nmtlink.py --nmt ~/osmo/osmocom-analog/src/nmt/nmt ROM \\
+        --eeprom 8123,456F,... --keys 26:0123456,30:offhook,50:onhook
 
-(tools/osmocom-analog/run-nmt.sh does all of it.)  Calls: --keys for the
-handset (e.g. 26:0123456,30:offhook,50:onhook), --bs-keys for osmocom's
-console (26:d calls the phone after its roaming update, h hangs up).
-Times are emulated seconds, a warm-boot lead-in of about 4.5 s included.
-osmocom's own timers run on the wall clock, so its timeouts (e.g. 3 s
-without SAT) do not fire in a lockstep run.  osmocom runs as fast
-as its sound device lets it; with the 'null' device that is unlimited,
-so its wave reader must wait for data instead of padding with silence,
-and read a FIFO without waiting for a full second of it
-(tools/osmocom-analog/wave-fifo-lockstep.patch) for the two programs to
-run in step.  The phone's audio is FFSK and the looped-back SAT (no speech yet).
+Options after a lone "--" go to osmocom (default -k 1 -Y DK,1).
+
+Calls: --keys for the handset (e.g. 26:0123456,30:offhook,50:onhook),
+--bs-keys for osmocom's console (26:d calls the phone after its roaming
+update, h hangs up).  Times are emulated seconds, a warm-boot lead-in of
+about 4.5 s included.
+
+Lockstep (default): osmocom's 'null' sound device does not pace it, so
+its wave reader waits for our data
+(tools/osmocom-analog/wave-fifo-lockstep.patch) and the two programs run
+in step, as fast as the emulator goes.  osmocom's own timers run on the
+wall clock, so its timeouts (e.g. 3 s without SAT) do not fire.
+
+--realtime paces the emulator to the wall clock, and with it osmocom.
+Speech then works through sound devices (ALSA names; with PipeWire
+"pipewire", or "pipewire:NODE=<node name or serial>" for one node):
+--net-audio is osmocom's call audio (the fixed network's end of a call,
+its -c option; -e among osmocom's options echoes the phone's speech
+instead), --radio-out the phone's earpiece/loudspeaker and --radio-in its
+microphone.  --hold-music FILE makes the network play FILE into calls
+(through a private PipeWire sink; --net-audio then only plays).
+
+The phone's audio paths are modelled here, not in the emulator: FFSK
+from the modem's bits, SAT looped back while the SAT gate is closed,
+earpiece and microphone gates, and the 2:1 compandor (latch bits from the
+ME59 manual's output table).
 """
 import argparse
+import collections
+import fcntl
 import os
+import pty
+import re
+import shlex
+import shutil
+import signal as sig
 import struct
+import subprocess
 import sys
+import tempfile
+import termios
+import threading
 import time
 
 import numpy as np
@@ -38,7 +65,25 @@ import nmtframe as nf  # noqa: E402
 RATE = 48000
 BLOCK = 960                 # 20 ms
 CH1_DIV = 19376
-SAT_BIT = 2                 # latch 1 bit 2: the SAT switch (manual: "Ö")
+
+# output latch bits of the audio paths (latch, bit), ME59 manual's table
+SAT_GATE = (1, 2)           # "Ö": SAT from the receiver to the modulator
+EAR = (1, 1)                # H: earpiece
+MIC = (1, 3)                # S: handset microphone (also pulses at idle)
+LSP = (3, 3)                # HF: loudspeaker amplifier
+EXT_MIC = (3, 2)            # ES: external microphone
+CC = (7, 3)                 # ME59 compandor on; never set by the MD59 firmware
+ALO = (5, 2)                # alert tone generator
+KV = (5, 1)                 # its level
+ALERT_HZ = 2000.0           # a guess: set by R13/C10 on AP1, not documented
+
+# osmocom's wave samples are deviation / 4700 Hz: speech at its nominal
+# 3 kHz deviation (its compandor's unity level) is 0.64.  Its call audio
+# has that level at 0.112 of full scale (SPEECH_LEVEL * 0.7079); our
+# sound devices have it at about 0.5 (ear and mic gains).
+NOMINAL = 3000.0 / 4700.0
+CALL_NOMINAL = 0.1585 * 0.7079
+DEFAULT_NMT_OPTS = ["-k", "1", "-Y", "DK,1"]
 
 
 def wav_header(rate=RATE):
@@ -48,57 +93,425 @@ def wav_header(rate=RATE):
             b"data" + struct.pack("<I", data))
 
 
-def read_header(f):
-    """osmocom writes a 44-byte placeholder (zeros) and fills it in only
-    when it closes the file, which a FIFO cannot do: skip it"""
-    read_exact(f, 44)
-
-
-def read_exact(f, n):
+def read_exact(fd, n):
     out = b""
     while len(out) < n:
-        b = f.read(n - len(out))
+        b = os.read(fd, n - len(out))
         if not b:
-            raise EOFError
+            raise EOFError("osmocom closed its audio")
         out += b
     return out
 
 
+def bit(r, lb):
+    return r.latch(lb[0]) >> lb[1] & 1
+
+
+# ---- osmocom
+
+ANSI = re.compile(rb"\x1b\[[0-9;?]*[A-Za-z]|\x1b[78]")
+LOGLINE = re.compile(r"(\w+\.c):(\d+) (.*)")
+
+
+class Osmocom:
+    """osmocom-analog's NMT base station in a pseudo-terminal, its wave
+    FIFOs in a temporary directory.  log_lines holds its log lines
+    ("nmt.c:697 Received ..."), newest last; quiet lines (levels printed
+    twice a second) are left out unless verbose."""
+
+    QUIET = ("RX Level", "Supervisory level")
+
+    def __init__(self, binary, opts=None, call_device=None, log_path=None,
+                 verbose=False, on_line=None):
+        self.dir = tempfile.mkdtemp(prefix="nmtlink")
+        self.tx_path = os.path.join(self.dir, "bs_tx.wav")
+        self.rx_path = os.path.join(self.dir, "bs_rx.wav")
+        os.mkfifo(self.tx_path)
+        os.mkfifo(self.rx_path)
+        opts = list(opts or DEFAULT_NMT_OPTS)
+        if not {"-b", "--buffer"} & set(opts):
+            # it processes this far ahead, in chunks this long; a radio
+            # link has no delay, and the phone's answers must come within
+            # osmocom's frame counts (8 identity requests): keep it short
+            opts += ["-b", "10"]
+        argv = [binary] + opts + [
+            "-a", "null", "--write-tx-wave", self.tx_path,
+            "--read-rx-wave", self.rx_path]
+        if call_device:
+            argv += ["-c", call_device]
+            if "--call-buffer" not in argv:
+                # osmocom writes call audio in bursts as it reads ours:
+                # 50 ms (its default) underruns
+                argv += ["--call-buffer", "200"]
+        self.master, slave = pty.openpty()
+        # a wide terminal, or osmocom wraps (and crashes on no size at all)
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
+        self.proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave,
+                                     start_new_session=True, close_fds=True)
+        os.close(slave)
+        self.log_file = open(log_path, "wb") if log_path else None
+        self.verbose = verbose
+        self.on_line = on_line
+        self.log_lines = collections.deque(maxlen=200)
+        self.lock = threading.Lock()
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
+        self.tx = self.rx = None
+
+    def _read(self):
+        """drain the terminal (osmocom blocks when it fills up)"""
+        buf = b""
+        while True:
+            try:
+                b = os.read(self.master, 4096)
+            except OSError:
+                break
+            if not b:
+                break
+            if self.log_file:
+                self.log_file.write(b)
+                self.log_file.flush()
+            buf += b
+            *lines, buf = re.split(rb"[\r\n]", buf)
+            for raw in lines:
+                m = LOGLINE.search(ANSI.sub(b"", raw).decode("utf-8", "replace"))
+                if not m:
+                    continue
+                text = "%s:%s %s" % m.groups()
+                if not self.verbose and any(q in text for q in self.QUIET):
+                    continue
+                with self.lock:
+                    self.log_lines.append(text)
+                if self.on_line:
+                    self.on_line(text)
+
+    def open_audio(self, prefill, timeout=10.0):
+        """Open the FIFOs as osmocom expects (it opens its TX recording,
+        then the RX playback and reads its header at once); returns
+        after writing the RX header and prefill and skipping the TX
+        placeholder header (zeros, filled in only when the file is
+        closed, which a FIFO cannot do)."""
+        self.tx = os.open(self.tx_path, os.O_RDONLY | os.O_NONBLOCK)
+        t_end = time.monotonic() + timeout
+        while True:
+            try:
+                self.rx = os.open(self.rx_path, os.O_WRONLY | os.O_NONBLOCK)
+                break
+            except OSError:
+                if self.proc.poll() is not None or time.monotonic() > t_end:
+                    raise RuntimeError("osmocom did not start; its log:\n" +
+                                       "\n".join(self.log_lines))
+                time.sleep(0.02)
+        for fd in (self.tx, self.rx):
+            fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) & ~os.O_NONBLOCK)
+        os.write(self.rx, wav_header())
+        os.write(self.rx, b"\0" * int(prefill * RATE) * 2)
+        read_exact(self.tx, 44)
+
+    def read(self, n):
+        """n samples of the base station's transmitter"""
+        raw = read_exact(self.tx, n * 2)
+        return np.frombuffer(raw, "<i2").astype(float) / 32768.0
+
+    def write(self, x):
+        os.write(self.rx, (np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
+
+    def console(self, keys):
+        os.write(self.master, keys.encode())
+
+    def lines(self, n):
+        with self.lock:
+            return list(self.log_lines)[-n:]
+
+    def close(self):
+        if self.proc.poll() is None:
+            self.proc.send_signal(sig.SIGINT)
+            try:
+                self.proc.wait(2.0)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait()
+        self.reader.join(1.0)   # its last lines (EIO once it is gone)
+        for fd in (self.tx, self.rx, self.master):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        if self.log_file:
+            self.log_file.close()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+# ---- sound devices (ALSA through aplay/arecord)
+
+def stop(p):
+    """end aplay/arecord (aplay may sit draining after SIGTERM)"""
+    for f in (p.stdin, p.stdout):
+        if f:
+            try:
+                f.close()
+            except OSError:
+                pass
+    p.terminate()
+    try:
+        p.wait(1.0)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
+
+
+class SoundOut:
+    """mono 48 kHz playback; drops audio rather than wait for the device"""
+
+    def __init__(self, device):
+        self.p = subprocess.Popen(
+            ["aplay", "-q", "-D", device, "-t", "raw", "-f", "S16_LE",
+             "-r", str(RATE), "-c", "1", "--buffer-time=200000"],
+            stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        fd = self.p.stdin.fileno()
+        fcntl.fcntl(fd, fcntl.F_SETFL, fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_NONBLOCK)
+
+    def write(self, x):
+        try:
+            os.write(self.p.stdin.fileno(),
+                     (np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
+        except (BlockingIOError, BrokenPipeError):
+            pass
+
+    def close(self):
+        stop(self.p)
+
+
+class SoundIn:
+    """mono 48 kHz capture; read() gives what has come (zeros if late)
+    and never lets more than max_s of it pile up"""
+
+    def __init__(self, device, max_s=0.2):
+        self.p = subprocess.Popen(
+            ["arecord", "-q", "-D", device, "-t", "raw", "-f", "S16_LE",
+             "-r", str(RATE), "-c", "1", "--buffer-time=200000"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.buf = np.zeros(0)
+        self.max = int(max_s * RATE)
+        self.lock = threading.Lock()
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        while True:
+            b = self.p.stdout.read(BLOCK * 2)
+            if not b:
+                break
+            x = np.frombuffer(b[:len(b) & ~1], "<i2").astype(float) / 32768.0
+            with self.lock:
+                self.buf = np.concatenate([self.buf, x])[-self.max:]
+
+    def read(self, n):
+        with self.lock:
+            x, self.buf = self.buf[:n], self.buf[n:]
+        return np.concatenate([x, np.zeros(n - len(x))])
+
+    def close(self):
+        self.p.terminate()
+        self.p.wait()
+
+
+class HoldMusic:
+    """Music on hold at the network's end: a private PipeWire null sink
+    with its monitor remapped to a source (unmuted: it comes up muted),
+    the file (anything ffmpeg reads, else WAV) looped into the sink by
+    pw-play.
+    device is the ALSA capture name of the source, for osmocom's -c."""
+
+    def __init__(self, path, level=1.3 * CALL_NOMINAL):
+        x = self._load(path)
+        self.x = (x / max(1e-9, np.abs(x).max()) * level * 32767).astype("<i2").tobytes()
+        self._unload_stale()
+        name = "nmtlink_hold_%d" % os.getpid()
+        self.modules = []
+        self.modules.append(self._pactl("load-module", "module-null-sink",
+                                        "sink_name=" + name, "channel_map=mono",
+                                        "rate=%d" % RATE,
+                                        "sink_properties=device.description=" + name))
+        self.modules.append(self._pactl("load-module", "module-remap-source",
+                                        "master=%s.monitor" % name,
+                                        "source_name=%s_src" % name, "channel_map=mono",
+                                        "source_properties=device.description=%s_src" % name))
+        self._pactl("set-source-mute", name + "_src", "0")
+        self.device = "pipewire:NODE=%s_src" % name
+        # pw-play, never moved to another output (the speakers) if the
+        # sink goes away while it plays
+        self.p = subprocess.Popen(
+            ["pw-play", "--target", name, "-P",
+             "{ node.dont-fallback = true node.dont-reconnect = true }",
+             "--raw", "--rate", str(RATE), "--channels", "1", "--format", "s16", "-"],
+            stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.stop = False
+        threading.Thread(target=self._play, daemon=True).start()
+
+    @classmethod
+    def _unload_stale(cls):
+        """modules left by an nmtlink that was killed"""
+        for line in cls._pactl("list", "short", "modules").splitlines():
+            m = re.search(r"nmtlink_hold_(\d+)", line)
+            if m and not os.path.exists("/proc/" + m.group(1)):
+                subprocess.run(["pactl", "unload-module", line.split()[0]],
+                               capture_output=True)
+
+    @staticmethod
+    def _pactl(*args):
+        return subprocess.run(["pactl"] + list(args), check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    @staticmethod
+    def _load(path):
+        if shutil.which("ffmpeg"):
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-f", "s16le",
+                                  "-ac", "1", "-ar", str(RATE), "-"],
+                                 check=True, capture_output=True).stdout
+            return np.frombuffer(raw, "<i2").astype(float)
+        from scipy.io import wavfile
+        rate, x = wavfile.read(path)
+        x = x.astype(float)
+        if x.ndim > 1:
+            x = x.mean(axis=1)
+        return signal.resample_poly(x, RATE, rate) if rate != RATE else x
+
+    def _play(self):
+        """blocking writes: the sink paces the loop"""
+        while not self.stop:
+            try:
+                self.p.stdin.write(self.x)
+                self.p.stdin.flush()
+            except (BrokenPipeError, ValueError, OSError):
+                break
+
+    def close(self):
+        self.stop = True
+        stop(self.p)
+        for m in reversed(self.modules):
+            subprocess.run(["pactl", "unload-module", m], capture_output=True)
+
+
+def call_device(net_audio=None, hold=None):
+    """osmocom's -c: the network's speaker/microphone, or with hold
+    music its playback part (null if none) and the music as capture"""
+    if not hold:
+        return net_audio
+    play = (net_audio or "null").split("/")[0]
+    return "%s/%s" % (play, hold.device)
+
+
+# ---- the phone's audio
+
+class Compandor:
+    """2:1 syllabic compressor or expander around unity level ref (a
+    rectified-average envelope, about 20 ms)"""
+
+    def __init__(self, expand, ref=NOMINAL, tau=0.02):
+        self.expand = expand
+        self.ref = ref
+        a = np.exp(-1.0 / (tau * RATE))
+        self.b, self.a = [1.0 - a], [1.0, -a]
+        self.zi = np.array([ref * 2 / np.pi])
+
+    def __call__(self, x):
+        env, self.zi = signal.lfilter(self.b, self.a, np.abs(x), zi=self.zi)
+        env = np.maximum(env * (np.pi / 2), 1e-4)
+        if self.expand:
+            return x * (env / self.ref)
+        return x / np.sqrt(env / self.ref)
+
+
 class Link:
-    def __init__(self, radio, channel, level=0.5, log=print):
+    """The phone's side: base station audio in, the phone's transmitter
+    audio out, one block at a time."""
+
+    def __init__(self, radio, channel, level=0.5, ear_gain=0.8, mic_gain=1.3,
+                 compandor=True, log=print):
         self.r = radio
         self.div = CH1_DIV + channel - 1
         self.r.air_channel(self.div)
         self.mod = Modulator(RATE)
         self.dem = Demodulator(RATE)
         self.level = level
+        self.ear_gain = ear_gain
+        self.mic_gain = mic_gain
+        self.compandor = compandor
+        self.alert_phase = 0.0
         self.log = log
-        self.slots = []         # phone TX slots not yet turned into audio
-        self.owed = 0.0         # fractional samples of the slot clock
+        self.owed = 0.0
         self.rx_bits = []       # demodulated BS bits (for logging)
         self.tx_on = False
         self.tx_slots = []
         self.pending = []
-        # the SAT band (osmocom: 3955-3985 Hz), filtered out of the
-        # receiver's audio and looped to the modulator while the SAT
-        # switch is closed, as AP1's FX316J and gate do
-        self.sat_sos = signal.butter(2, [3850, 4100], "bandpass", fs=RATE,
-                                     output="sos")
-        self.sat_zi = signal.sosfilt_zi(self.sat_sos) * 0.0
+        # the receiver's audio split by AP1's FX316J: the SAT band
+        # (osmocom: 3955-3985 Hz), looped to the modulator while the SAT
+        # gate is closed, and the speech band for the earpiece; the
+        # microphone's speech band.  Emphasis is left out: osmocom's
+        # audio is the flat speech, and the phone's own pre- and
+        # de-emphasis would cancel.
+        self.sat_sos = signal.butter(2, [3850, 4100], "bandpass", fs=RATE, output="sos")
+        self.sat_zi = np.zeros((self.sat_sos.shape[0], 2))
+        self.ear_sos = signal.butter(4, [300, 3400], "bandpass", fs=RATE, output="sos")
+        self.ear_zi = np.zeros((self.ear_sos.shape[0], 2))
+        self.mic_sos = signal.butter(4, [300, 3000], "bandpass", fs=RATE, output="sos")
+        self.mic_zi = np.zeros((self.mic_sos.shape[0], 2))
+        self.expander = Compandor(True)
+        self.compressor = Compandor(False)
         self.sat = np.zeros(0)
-        self.sat_on = False
+        self.speech = np.zeros(0)
+        self.state = {}
+        self.rng = np.random.default_rng(1)
+
+    def watch(self, name, on):
+        if self.state.get(name) != on:
+            self.state[name] = on
+            self.log("%8.3f %s %s" % (self.r.time(), name, "on" if on else "off"))
 
     def bs_audio(self, samples):
-        """base station TX audio -> bits into the phone's air"""
+        """base station TX audio -> bits into the phone's air, SAT and
+        speech bands kept for this block"""
         sat, self.sat_zi = signal.sosfilt(self.sat_sos, samples, zi=self.sat_zi)
+        sp, self.ear_zi = signal.sosfilt(self.ear_sos, samples, zi=self.ear_zi)
         self.sat = np.concatenate([self.sat, sat])
+        self.speech = np.concatenate([self.speech, sp])
         bits = self.dem.feed(samples)
-        self.r.air_push([2 if b < 0 else b for b in bits])
+        # the carrier is the base station transmitting at all (SAT alone
+        # is 0.06), not FFSK: with speech or silence on the traffic
+        # channel the modem gets noise bits and SQ stays open
+        carrier = float(np.sqrt(np.mean(samples ** 2))) > 0.005
+        self.watch("BS carrier", carrier)
+        self.r.air_push([(b if b >= 0 else int(self.rng.integers(2))) if carrier else 2
+                         for b in bits])
         self.rx_bits += bits
 
-    def phone_audio(self, n):
-        """n samples of the phone's TX audio"""
-        for s in self.r.tx_take():
+    def companding(self):
+        """The ME59 switches its compandor with CC; the MD59 firmware never
+        sets that bit, and how it switches is not known: with compandor
+        on, compand while the SAT loop is closed (a call in speech)"""
+        return bool(bit(self.r, CC)) or (self.compandor and bool(bit(self.r, SAT_GATE)))
+
+    def ear_audio(self, n):
+        """n samples for the earpiece/loudspeaker (after phone_audio):
+        received speech through the H/HF gates, plus the alert tone"""
+        x, self.speech = self.speech[:n], self.speech[n:]
+        x = np.concatenate([x, np.zeros(n - len(x))])
+        if self.companding():
+            x = self.expander(x)
+        on = bit(self.r, EAR) or bit(self.r, LSP)
+        x = x * self.ear_gain if on else np.zeros(n)
+        if bit(self.r, ALO):
+            ph = self.alert_phase + 2 * np.pi * ALERT_HZ / RATE * np.arange(1, n + 1)
+            x = x + np.sin(ph) * (0.4 if bit(self.r, KV) else 0.15)
+            self.alert_phase = ph[-1] % (2 * np.pi)
+        return x
+
+    def phone_audio(self, n, mic=None):
+        """n samples of the phone's TX audio (mic: n microphone samples)"""
+        slots = self.r.tx_take()
+        data = any(s in (0, 1) for s in slots)
+        for s in slots:
             if s in (0, 1):
                 a = self.mod.bits([s]) * self.level
             else:
@@ -118,14 +531,28 @@ class Link:
         if len(x) < n:
             x = np.concatenate([x, np.zeros(n - len(x))])
         self.pending = [x[n:]]
-        x, sat, self.sat = x[:n], self.sat[:n], self.sat[n:]
-        on = bool(self.r.latch(1) >> SAT_BIT & 1)
-        if on != self.sat_on:
-            self.sat_on = on
-            self.log("%8.3f SAT loop %s" % (self.r.time(), "on" if on else "off"))
-        if on and self.tx_on:
-            x = x.copy()
-            x[:len(sat)] += sat
+        x = x[:n].copy()
+        sat, self.sat = self.sat[:n], self.sat[n:]
+        sat_on = bool(bit(self.r, SAT_GATE))
+        # S also pulses at idle (the ham sources' HSM); speech only goes
+        # out in a call (SAT loop closed) and never over data
+        mic_on = (bool(bit(self.r, MIC) or bit(self.r, EXT_MIC)) and sat_on
+                  and not data)
+        self.watch("microphone", mic_on)
+        cc = self.companding()
+        self.watch("SAT loop", sat_on)
+        self.watch("earpiece", bool(bit(self.r, EAR)))
+        self.watch("loudspeaker", bool(bit(self.r, LSP)))
+        if mic is None:
+            mic = np.zeros(n)
+        sp, self.mic_zi = signal.sosfilt(self.mic_sos, mic * self.mic_gain, zi=self.mic_zi)
+        if cc:
+            sp = self.compressor(sp)
+        if self.tx_on:
+            if sat_on:
+                x[:len(sat)] += sat
+            if mic_on:
+                x += sp
         return x
 
     def bs_frames(self):
@@ -165,6 +592,77 @@ def frames(bits):
     return out, max(0, used)
 
 
+def warm_boot(r):
+    """Boot cold, power off, boot warm (RAM kept).  The original MD59's
+    cold start (fresh RAM) calls 0x39AC with X = rB (scal pushes there)
+    and returns with X = r2 (sret pops two bytes): the stack then sits 2
+    bytes high and overwrites the first two digits of the number copy at
+    0x8300 when dialling.  A real phone has battery-backed RAM and boots
+    warm."""
+    r.power(True)
+    r.run(4.0)
+    r.set_input("poweroff", 1)
+    t = r.time() + 6.0
+    while r.powered() and r.time() < t:
+        r.run(0.1)
+    r.set_input("poweroff", 0)
+    r.run(0.5)
+    r.tx_take()             # not on the air: no link yet
+
+
+class Session:
+    """A radio linked to an osmocom base station, one 20 ms block per
+    step().  The radio is powered on by start()."""
+
+    def __init__(self, radio, osmo, channel=1, prefill=0.02, ear=None, mic=None,
+                 hold=None, log=print, **link_opts):
+        self.r = radio
+        self.osmo = osmo
+        self.link = Link(radio, channel, log=log, **link_opts)
+        self.ear = ear
+        self.mic = mic
+        self.hold = hold
+        self.log = log
+        self.prefill = prefill
+        self.last = None
+        self.leds = None
+
+    def start(self):
+        # osmocom reads its buffer (-b, 10 ms) at a time: the phone's
+        # audio must be that far ahead (it is also the extra delay the
+        # base station sees)
+        self.osmo.open_audio(self.prefill)
+        self.r.power(True)
+
+    def step(self, after_run=None):
+        """one block: base station audio in, run the radio, its audio out;
+        after_run(radio) is called between running and taking its audio
+        (handset scripts, key releases)"""
+        self.link.bs_audio(self.osmo.read(BLOCK))
+        self.r.run(BLOCK / RATE)
+        if after_run:
+            after_run(self.r)
+        mic = self.mic.read(BLOCK) if self.mic else None
+        self.osmo.write(self.link.phone_audio(BLOCK, mic))
+        ear = self.link.ear_audio(BLOCK)
+        if self.ear:
+            self.ear.write(ear)
+        for fr in self.link.bs_frames():
+            if fr != self.last:
+                self.log("%8.3f BS: %s" % (self.r.time(), fr))
+                self.last = fr
+        leds = self.r.led_names()
+        if leds != self.leds:
+            self.leds = leds
+            self.log("%8.3f leds %s" % (self.r.time(), " ".join(leds)))
+
+    def close(self):
+        self.osmo.close()
+        for d in (self.ear, self.mic, self.hold):
+            if d:
+                d.close()
+
+
 def handset_script(spec, hold=0.15, gap=0.15):
     """[(time, log text, action(radio))] from "T:ACTION,...", in time order;
     typed keys become key down/up events (run in 20 ms steps)"""
@@ -183,95 +681,111 @@ def handset_script(spec, hold=0.15, gap=0.15):
     return sorted(out, key=lambda e: e[0])
 
 
+def add_audio_args(ap):
+    ap.add_argument("--net-audio",
+                    help="osmocom's call audio device (ALSA, e.g. pipewire)")
+    ap.add_argument("--radio-out", help="the phone's earpiece/loudspeaker (ALSA)")
+    ap.add_argument("--radio-in", help="the phone's microphone (ALSA)")
+    ap.add_argument("--hold-music", metavar="FILE",
+                    help="the network plays FILE (looped) into calls (PipeWire)")
+    ap.add_argument("--ear-gain", type=float, default=0.8,
+                    help="speech at nominal deviation comes out at 0.5 of full scale")
+    ap.add_argument("--mic-gain", type=float, default=1.3,
+                    help="0.5 of full scale goes out at nominal deviation")
+    ap.add_argument("--no-compandor", action="store_true",
+                    help="the phone's audio linear (osmocom: -C 0)")
+
+
+def open_audio(a):
+    """(ear, mic, hold, osmocom call device) from add_audio_args options"""
+    ear = SoundOut(a.radio_out) if a.radio_out else None
+    mic = SoundIn(a.radio_in) if a.radio_in else None
+    hold = HoldMusic(a.hold_music) if a.hold_music else None
+    return ear, mic, hold, call_device(a.net_audio, hold)
+
+
 def main():
+    argv = sys.argv[1:]
+    nmt_opts = None
+    if "--" in argv:
+        i = argv.index("--")
+        argv, nmt_opts = argv[:i], argv[i + 1:]
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("rom")
-    ap.add_argument("bs_tx", help="FIFO osmocom writes its TX audio to")
-    ap.add_argument("bs_rx", help="FIFO osmocom reads its RX audio from")
+    ap.add_argument("--nmt", required=True, help="osmocom-analog's nmt binary")
     ap.add_argument("--model", default="MD59")
     ap.add_argument("--cu", default="CU59")
     ap.add_argument("--eeprom", help="16 hex words, comma separated")
     ap.add_argument("--channel", type=int, default=1)
     ap.add_argument("--seconds", type=float, default=60.0)
-    # osmocom reads 50 ms at a time: the phone's audio must be that far
-    # ahead (it is also the extra delay the base station sees)
-    ap.add_argument("--prefill", type=float, default=0.06)
+    ap.add_argument("--prefill", type=float, default=0.02,
+                    help="seconds of phone audio ahead (osmocom -b 10 needs 0.01)")
     ap.add_argument("--keys", default="",
                     help="handset script, T:ACTION,... with ACTION digits/keys "
                     "to type, 'offhook' or 'onhook' (e.g. 30:0123456,32:offhook)")
-    ap.add_argument("--console",
-                    help="FIFO into osmocom's console (its terminal's input)")
     ap.add_argument("--bs-keys", default="",
                     help="console script, T:KEYS,... (osmocom: digits, d dial, "
                     "h hang up; after a roaming update d calls the phone)")
     ap.add_argument("--cold", action="store_true",
                     help="link straight after a cold start (the original MD59 "
                     "then dials the first two digits as 0)")
-    a = ap.parse_args()
+    ap.add_argument("--realtime", action="store_true",
+                    help="run at wall-clock speed (needed for speech and osmocom's timeouts)")
+    ap.add_argument("--osmo-log", help="osmocom's raw terminal output to this file")
+    ap.add_argument("--verbose", action="store_true",
+                    help="also osmocom's level lines (twice a second)")
+    add_audio_args(ap)
+    a = ap.parse_args(argv)
+    if (a.net_audio or a.radio_out or a.radio_in or a.hold_music) and not a.realtime:
+        ap.error("sound devices need --realtime")
 
     r = Radio(a.rom, model=a.model, cu=a.cu, power=False)
     if a.eeprom:
         r.eeprom([int(w, 16) for w in a.eeprom.split(",")])
     if not a.cold:
-        # The original MD59's cold start (fresh RAM) calls 0x39AC with X =
-        # rB (scal pushes there) and returns with X = r2 (sret pops two
-        # bytes): the stack then sits 2 bytes high and overwrites the
-        # first two digits of the number copy at 0x8300 when dialling.
-        # A real phone has battery-backed RAM and boots warm: do the same.
-        r.power(True)
-        r.run(4.0)
-        r.set_input("poweroff", 1)
-        while r.powered() and r.time() < 10:
-            r.run(0.1)
-        r.set_input("poweroff", 0)
-        r.run(0.5)
-        r.tx_take()             # not on the air: no link yet
-    link = Link(r, a.channel)
-    # run-nmt.sh starts osmocom with this FIFO as its terminal's input:
-    # open it first, or osmocom never starts
-    console = open(a.console, "wb", buffering=0) if a.console else None
-    bs_script = []
-    for item in filter(None, a.bs_keys.split(",")):
-        t, keys = item.split(":", 1)
-        bs_script.append((float(t), keys))
-    bs_script.sort()
-    # osmocom opens its TX recording first, then the RX playback (and
-    # reads its header at once): open in the same order
-    tx = open(a.bs_tx, "rb", buffering=0)
-    rx = open(a.bs_rx, "wb", buffering=0)
-    rx.write(wav_header())
-    rx.write(b"\0" * int(a.prefill * RATE) * 2)
-    read_header(tx)
+        warm_boot(r)
+    t_wall = time.monotonic()
+    ear, mic, hold, calldev = open_audio(a)
+    osmo = Osmocom(a.nmt, nmt_opts, calldev, a.osmo_log, a.verbose,
+                   on_line=lambda s: print("%8.3f osmo %s" % (r.time(), s), flush=True))
+    s = Session(r, osmo, a.channel, a.prefill, ear=ear, mic=mic, hold=hold,
+                log=lambda m: print(m, flush=True),
+                ear_gain=a.ear_gain, mic_gain=a.mic_gain,
+                compandor=not a.no_compandor)
     script = handset_script(a.keys)
-    r.power(True)
-    t0 = time.time()
-    leds = None
-    while r.time() < a.seconds:
-        raw = read_exact(tx, BLOCK * 2)
-        link.bs_audio(np.frombuffer(raw, "<i2").astype(float) / 32768.0)
-        r.run(BLOCK / RATE)
+    bs_script = sorted((float(t), k) for t, k in
+                       (item.split(":", 1) for item in filter(None, a.bs_keys.split(","))))
+
+    def actions(r):
         while script and script[0][0] <= r.time():
             _, what, act = script.pop(0)
             act(r)
             if what:
-                link.log("%8.3f %s" % (r.time(), what))
+                s.log("%8.3f %s" % (r.time(), what))
         while bs_script and bs_script[0][0] <= r.time():
             _, keys = bs_script.pop(0)
-            link.log("%8.3f console %s" % (r.time(), keys))
-            if console:
-                console.write(keys.encode())
-        out = link.phone_audio(BLOCK)
-        rx.write((np.clip(out, -1, 1) * 32767).astype("<i2").tobytes())
-        for fr in link.bs_frames():
-            if fr != getattr(link, "last", None):
-                link.log("%8.3f BS: %s" % (r.time(), fr))
-                link.last = fr
-        l = r.led_names()
-        if l != leds:
-            leds = l
-            link.log("%8.3f leds %s" % (r.time(), " ".join(l)))
-    link.log("done: %.1f s emulated in %.1f s" % (r.time(), time.time() - t0))
+            s.log("%8.3f console %s" % (r.time(), keys))
+            osmo.console(keys)
+
+    def terminate(signum, frame):
+        raise KeyboardInterrupt
+    sig.signal(sig.SIGTERM, terminate)
+    sig.signal(sig.SIGHUP, terminate)
+    try:
+        s.start()
+        t0, e0 = time.monotonic(), r.time()
+        while r.time() < a.seconds:
+            s.step(actions)
+            if a.realtime:
+                ahead = (r.time() - e0) - (time.monotonic() - t0)
+                if ahead > 0:
+                    time.sleep(ahead)
+    except (EOFError, KeyboardInterrupt) as e:
+        s.log("stopped: %s" % (e or "interrupted"))
+    finally:
+        s.close()
+    s.log("done: %.1f s emulated in %.1f s" % (r.time(), time.monotonic() - t_wall))
 
 
 if __name__ == "__main__":

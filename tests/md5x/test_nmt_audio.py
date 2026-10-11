@@ -77,5 +77,49 @@ class TestFFSK(unittest.TestCase):
         self.assertIn("001E812345600000", t.decode_tx_bits(bits))
 
 
+class TestAirWhileOff(unittest.TestCase):
+
+    def test_slots_continue_while_off(self):
+        """one TX slot per bit period while off too: no burst of stale
+        slots at the next power-on (nmtlink's audio would lag)"""
+        import roms
+        from md5xemu import Radio
+        try:
+            rom, lst, model, cu = roms.build("mx5x-md59")
+        except roms.Unavailable as e:
+            self.skipTest(str(e))
+        r = Radio(rom, lst, model=model, cu=cu)
+        r.run(1.0)
+        r.tx_take()
+        r.power(False)
+        r.run(1.0)
+        off = r.tx_take()
+        self.assertAlmostEqual(len(off), 1200, delta=2)
+        self.assertEqual(set(off), {Radio.TX_OFF})
+        r.power(True)
+        r.run(0.1)
+        self.assertAlmostEqual(len(r.tx_take()), 120, delta=2)
+
+
+@unittest.skipUnless(Modulator, "needs numpy")
+class TestCompandor(unittest.TestCase):
+
+    def test_unity_and_roundtrip(self):
+        try:
+            import nmtlink
+        except ImportError as e:
+            self.skipTest(str(e))
+        t = numpy.arange(48000) / 48000.0
+        for a in (0.1, nmtlink.NOMINAL, 1.0):
+            x = a * numpy.sin(2 * numpy.pi * 700 * t)
+            c, e = nmtlink.Compandor(False), nmtlink.Compandor(True)
+            y = numpy.concatenate([c(x[i:i + 960]) for i in range(0, 48000, 960)])
+            z = numpy.concatenate([e(y[i:i + 960]) for i in range(0, 48000, 960)])
+            # 2:1 around the nominal level, and back
+            self.assertAlmostEqual(abs(y[-4800:]).max(),
+                                   (a * nmtlink.NOMINAL) ** 0.5, delta=0.02)
+            self.assertAlmostEqual(abs(z[-4800:]).max(), a, delta=0.02 * max(a, 0.3))
+
+
 if __name__ == "__main__":
     unittest.main()

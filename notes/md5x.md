@@ -85,7 +85,7 @@ release, release guard; the phone then shows SERV without ROAM.
 | 68xx cycle counts | from the CDP1805 user manual's table as remembered; the Harris data sheet extract in hand has no table. OH1E uses only STPC/LDC/STM/CIE/CID (no timing-critical 68xx) |
 | No CPU exerciser | no zexall equivalent for the 1802; unit tests + firmware runs only |
 | IDL | left on any interrupt request, even with IE = 0 (1802 docs unclear) |
-| FFSK | bit level in the board (ideal demodulator); audio only in the host: `python/ffsk.py` (modulator, non-coherent demodulator), `python/nmtlink.py` links to osmocom-analog through two FIFOs (`tools/osmocom-analog/`), with handset/console scripts and SAT looped back in the host while latch 1 bit 2 (SAT gate) is set. No speech, no noise |
+| FFSK | bit level in the board (ideal demodulator); audio only in the host: `python/ffsk.py` (modulator, non-coherent demodulator), `python/nmtlink.py` links to osmocom-analog through two FIFOs (`tools/osmocom-analog/`), with handset/console scripts, SAT loop (latch 1 bit 2), speech paths, compandor and sound devices in the host, lockstep or real time; md5xtui.py `--nmt`. While the radio is off the bit grid goes on (base-station bits pass unheard, TX slots say off). No noise |
 | MD50 PROM A4-A7 | not modelled |
 | 93C06 write time, busy status | writes are instant |
 | 8253 GATE1 (inverted OUT0), OH1E's 455 kHz AFC measurement | gate not modelled |

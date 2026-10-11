@@ -18,13 +18,30 @@ Radio:           Space  toggle PTT        g  toggle received signal
                  o      power switch      h  toggle handset hook
                  F2     speed x1/x10      q  quit (RAM saved if --ram)
 
+NMT network (--nmt, the original MD59 firmware with osmocom-analog's
+base station, real time):
+                 F5  the network calls the phone (the last registered number)
+                 F6  the network hangs up
+    python3 emu/python/md5xtui.py --rom reference/oh5nxo/mods/Mx5x/orig/MD59SB.raw.orig \
+        --model MD59 --cu CU59 --eeprom 8123,456F,1234,0,111A,26FF,FFFF,...,14DC \
+        --nmt ~/osmo/osmocom-analog/src/nmt/nmt --radio-out pipewire --radio-in pipewire
+    (dial: digits, then h for off-hook; h again hangs up.)  Sound devices
+    are ALSA names ("pipewire:NODE=<node>" for one PipeWire node):
+    --radio-out/--radio-in the handset, --net-audio the network's end
+    (osmocom's call audio), --hold-music FILE plays FILE into calls
+    instead of the network's microphone; --nmt-opts for osmocom (default
+    "-k 1 -Y DK,1").  Without --ram the phone boots cold, is switched off
+    and boots warm (the original firmware's cold start garbles dialling).
+
 Firmware notes: mx5x takes 5 digits with the 100 MHz digit implied
 ("33500" = 433.500).  OH1E: digits then #; on a CU59 the first key after
 a cold start sets the handset type.
 """
 import argparse
+import collections
 import curses
 import os
+import shlex
 import sys
 import time
 
@@ -32,6 +49,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "tests", "md5x"))
 from md5xemu import Radio  # noqa: E402
+import nmtlink  # noqa: E402
 
 HOLDS = [0.15, 0.7, 1.5, 3.0]
 KEYMAP = {ord(c): c for c in "0123456789*#+-"}
@@ -97,6 +115,15 @@ def render(r, st, args):
     out.append("  next key hold: %.2f s (Tab)   %s" % (HOLDS[st.hold_i], st.msg))
     out.append("  keys: 0-9*# c=CL s=CS r=RCL e=E p b d x +/-  "
                "Space=PTT g=signal h=hook o=power q=quit")
+    net = getattr(st, "net", None)
+    if net:
+        out.append("")
+        out.append("  NMT network: osmocom %s   F5 call the phone  F6 hang up" %
+                   " ".join(net.opts))
+        out.append("  link:")
+        out += ["    " + x for x in list(net.log)[-6:]]
+        out.append("  osmocom:")
+        out += ["    " + x for x in net.osmo.lines(10)]
     return out
 
 
@@ -129,6 +156,41 @@ def handle(r, st, ch):
     return None
 
 
+class Net:
+    """the radio linked to osmocom-analog's NMT (nmtlink.Session)"""
+
+    def __init__(self, r, args):
+        self.opts = shlex.split(args.nmt_opts)
+        self.log = collections.deque(maxlen=50)
+        self.file = open(args.nmt_log, "w") if args.nmt_log else None
+
+        def log(line):
+            self.log.append(line)
+            if self.file:
+                self.file.write(line + "\n")
+                self.file.flush()
+
+        def osmo_line(line):
+            if self.file:
+                self.file.write("%8.3f osmo %s\n" % (r.time(), line))
+                self.file.flush()
+        if not args.ram or not os.path.exists(args.ram):
+            nmtlink.warm_boot(r)
+        else:
+            r.power(False)
+        ear, mic, hold, calldev = nmtlink.open_audio(args)
+        self.osmo = nmtlink.Osmocom(args.nmt, self.opts, calldev, on_line=osmo_line)
+        self.session = nmtlink.Session(
+            r, self.osmo, args.channel, ear=ear, mic=mic, hold=hold, log=log, ear_gain=args.ear_gain, mic_gain=args.mic_gain,
+            compandor=not args.no_compandor)
+        self.session.start()
+
+    def close(self):
+        self.session.close()
+        if self.file:
+            self.file.close()
+
+
 def open_radio(args):
     if args.rom:
         rom, lst, model, cu = args.rom, args.lst, args.model, args.cu
@@ -148,6 +210,8 @@ def open_radio(args):
             ram = f.read()
     r = Radio(rom, lst, model=model or "MD59", cu=cu or "CU59", ram=ram,
               ram_size=args.ram_size)
+    if args.eeprom:
+        r.eeprom([int(w, 16) for w in args.eeprom.split(",")])
     if ram is None and "tx_start" in r.syms and "TX_START" in r.syms:
         # OH1E with zeroed RAM refuses all TX: use its band defaults
         r.write("tx_start", r.syms["TX_START"].to_bytes(2, "little"))
@@ -198,9 +262,24 @@ def main(stdscr, args):
     stdscr.refresh()
     r = open_radio(args)
     st = State()
+    st.net = Net(r, args) if args.nmt else None
+    try:
+        loop(stdscr, r, st, args)
+    finally:
+        if st.net:
+            st.net.close()
+
+
+def loop(stdscr, r, st, args):
     pending = None          # (key, release time)
     t0, emu0 = time.monotonic(), r.time()
     last_tone = 0.0
+
+    def release(r):
+        nonlocal pending
+        if pending and r.time() >= pending[1]:
+            r.key(None)
+            pending = None
 
     while True:
         ch = stdscr.getch()
@@ -209,8 +288,17 @@ def main(stdscr, args):
                 save_ram(r, args)
                 return
             if ch == curses.KEY_F2:
-                st.speed = 10 if st.speed == 1 else 1
-                t0, emu0 = time.monotonic(), r.time()
+                if st.net:
+                    st.msg = "real time only with the network"
+                else:
+                    st.speed = 10 if st.speed == 1 else 1
+                    t0, emu0 = time.monotonic(), r.time()
+            elif ch == curses.KEY_F5 and st.net:
+                st.net.osmo.console("d")
+                st.msg = "network: dial"
+            elif ch == curses.KEY_F6 and st.net:
+                st.net.osmo.console("h")
+                st.msg = "network: hang up"
             elif pending is None:
                 k = handle(r, st, ch)
                 if k:
@@ -221,7 +309,17 @@ def main(stdscr, args):
             ch = stdscr.getch()
 
         target = emu0 + (time.monotonic() - t0) * st.speed
-        while target - r.time() > 1e-6:
+        if st.net:
+            if target - r.time() > 0.5:         # fell behind: catch up later
+                t0, emu0 = time.monotonic(), r.time()
+                target = emu0
+            try:
+                while target - r.time() >= nmtlink.BLOCK / nmtlink.RATE:
+                    st.net.session.step(release)
+            except EOFError:
+                save_ram(r, args)
+                raise SystemExit("osmocom stopped:\n" + "\n".join(st.net.osmo.lines(20)))
+        while not st.net and target - r.time() > 1e-6:
             step = min(target - r.time(), 0.02)
             if pending and r.time() + step >= pending[1]:
                 r.run(max(0.0, pending[1] - r.time()))
@@ -256,6 +354,14 @@ if __name__ == "__main__":
     ap.add_argument("--ram-size", type=int, default=0,
                     help="RAM bytes (default 1024 MD50, 2048 MD59/ME59)")
     ap.add_argument("--script", help="headless: key script, print screen")
+    ap.add_argument("--eeprom", help="93C06 contents: 16 hex words, comma separated")
+    ap.add_argument("--nmt", metavar="BINARY",
+                    help="link to osmocom-analog's NMT base station (its nmt binary)")
+    ap.add_argument("--nmt-opts", default=" ".join(nmtlink.DEFAULT_NMT_OPTS),
+                    help="osmocom's options (default %(default)s)")
+    ap.add_argument("--channel", type=int, default=1, help="osmocom's channel")
+    ap.add_argument("--nmt-log", metavar="FILE", help="link and osmocom log lines to FILE")
+    nmtlink.add_audio_args(ap)
     a = ap.parse_args()
     if a.script is not None:
         run_script(a)
