@@ -121,5 +121,46 @@ class TestCompandor(unittest.TestCase):
             self.assertAlmostEqual(abs(z[-4800:]).max(), a, delta=0.02 * max(a, 0.3))
 
 
+@unittest.skipUnless(Modulator, "needs numpy")
+class TestRingback(unittest.TestCase):
+
+    def end(self, rings):
+        try:
+            import nmtlink
+        except ImportError as e:
+            self.skipTest(str(e))
+        import threading
+        n = nmtlink.NetworkEnd.__new__(nmtlink.NetworkEnd)   # no PipeWire
+        n.music = numpy.full(1000, 0.1)
+        n.mic, n.rings, n.ring_level = None, rings, 0.1
+        n.lock = threading.Lock()
+        n.state, n.t_state, n.pos = "idle", 0, 0
+        return n
+
+    def audio(self, n, seconds):
+        return numpy.concatenate([n._block(960) for _ in range(int(seconds * 50))])
+
+    def test_call_from_phone(self):
+        n = self.end(2)
+        n.on_line("console.c:251 Incoming call from '8123456'")
+        self.assertFalse(self.audio(n, 1.0).any())          # silent until connected
+        n.on_line("nmt.c:1040 (chan 1) Connect audio.")
+        x = self.audio(n, 11.0)
+        on = [abs(x[i * 48000:(i + 1) * 48000]).max() > 0.05 for i in range(11)]
+        # ring, 4 s off, ring, 1 s pause, then the call audio
+        self.assertEqual(on, [1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1])
+        self.assertEqual(n.state, "connected")
+        n.on_line("console.c:321 Call disconnected with audio (hangup)")
+        self.assertFalse(self.audio(n, 0.5).any())
+
+    def test_call_to_phone_and_no_rings(self):
+        for rings, first in ((2, "console.c:477 Outgoing call to '8123456'"),
+                             (0, "console.c:251 Incoming call from '8123456'")):
+            n = self.end(rings)
+            n.on_line(first)
+            n.on_line("nmt.c:1336 (chan 1) Connect audio.")
+            self.assertTrue(numpy.allclose(self.audio(n, 0.1), 0.1))
+
+
 if __name__ == "__main__":
     unittest.main()

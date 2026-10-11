@@ -29,7 +29,8 @@ base station, real time):
     are ALSA names ("pipewire:NODE=<node>" for one PipeWire node):
     --radio-out/--radio-in the handset, --net-audio the network's end
     (osmocom's call audio), --hold-music FILE plays FILE into calls
-    instead of the network's microphone; --nmt-opts for osmocom (default
+    instead of the network's microphone, --rings N rings of ringback
+    before a call from the phone is answered (default 3); --nmt-opts for osmocom (default
     "-k 1 -Y DK,1").  Without --ram the phone boots cold, is switched off
     and boots warm (the original firmware's cold start garbles dialling).
 
@@ -178,10 +179,12 @@ class Net:
             nmtlink.warm_boot(r)
         else:
             r.power(False)
-        ear, mic, hold, calldev = nmtlink.open_audio(args)
+        ear, mic, net, calldev = nmtlink.open_audio(args)
         self.osmo = nmtlink.Osmocom(args.nmt, self.opts, calldev, on_line=osmo_line)
+        if net:
+            self.osmo.listeners.append(net.on_line)
         self.session = nmtlink.Session(
-            r, self.osmo, args.channel, ear=ear, mic=mic, hold=hold, log=log, ear_gain=args.ear_gain, mic_gain=args.mic_gain,
+            r, self.osmo, args.channel, ear=ear, mic=mic, hold=net, log=log, ear_gain=args.ear_gain, mic_gain=args.mic_gain,
             compandor=not args.no_compandor)
         self.session.start()
 

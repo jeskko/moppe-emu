@@ -29,7 +29,9 @@ Speech then works through sound devices (ALSA names; with PipeWire
 its -c option; -e among osmocom's options echoes the phone's speech
 instead), --radio-out the phone's earpiece/loudspeaker and --radio-in its
 microphone.  --hold-music FILE makes the network play FILE into calls
-(through a private PipeWire sink; --net-audio then only plays).
+(through a private PipeWire sink; --net-audio then only plays).  A call
+from the phone hears --rings N rings of ringback (425 Hz) before the
+network's audio; osmocom itself answers at once.
 
 The phone's audio paths are modelled here, not in the emulator: FFSK
 from the modem's bits, SAT looped back while the SAT gate is closed,
@@ -151,7 +153,7 @@ class Osmocom:
         os.close(slave)
         self.log_file = open(log_path, "wb") if log_path else None
         self.verbose = verbose
-        self.on_line = on_line
+        self.listeners = [on_line] if on_line else []
         self.log_lines = collections.deque(maxlen=200)
         self.lock = threading.Lock()
         self.reader = threading.Thread(target=self._read, daemon=True)
@@ -182,8 +184,8 @@ class Osmocom:
                     continue
                 with self.lock:
                     self.log_lines.append(text)
-                if self.on_line:
-                    self.on_line(text)
+                for f in self.listeners:
+                    f(text)
 
     def open_audio(self, prefill, timeout=10.0):
         """Open the FIFOs as osmocom expects (it opens its TX recording,
@@ -316,18 +318,34 @@ class SoundIn:
         self.p.wait()
 
 
-class HoldMusic:
-    """Music on hold at the network's end: a private PipeWire null sink
-    with its monitor remapped to a source (unmuted: it comes up muted),
-    the file (anything ffmpeg reads, else WAV) looped into the sink by
-    pw-play.
-    device is the ALSA capture name of the source, for osmocom's -c."""
+class NetworkEnd:
+    """The fixed network's end of a call, as osmocom's call capture: a
+    private PipeWire null sink with its monitor remapped to a source
+    (unmuted: it comes up muted), fed by pw-play from here.  It plays
+    silence when idle; for a call from the phone, ringback (rings x 425 Hz
+    1 s on / 4 s off, then 1 s) before the call audio; for a call to the
+    phone the call audio at once.  The call audio is a file looped (hold,
+    anything ffmpeg reads, else WAV) or a capture device (mic), else
+    silence.  device is the ALSA capture name of the source, for -c.
+    Call progress comes from osmocom's log lines (on_line)."""
 
-    def __init__(self, path, level=1.3 * CALL_NOMINAL):
-        x = self._load(path)
-        self.x = (x / max(1e-9, np.abs(x).max()) * level * 32767).astype("<i2").tobytes()
+    RING_HZ, RING_ON, RING_OFF = 425.0, 1.0, 4.0
+    AHEAD = 0.1                 # seconds written ahead of the wall clock
+
+    def __init__(self, hold=None, mic=None, rings=2, level=1.3 * CALL_NOMINAL):
+        self.music = None
+        if hold:
+            x = self._load(hold)
+            self.music = x / max(1e-9, np.abs(x).max()) * level
+        self.mic = SoundIn(mic, max_s=0.3) if mic else None
+        self.rings = rings
+        self.ring_level = 0.7 * CALL_NOMINAL
+        self.lock = threading.Lock()
+        self.state = "idle"     # idle, from_phone (call set up), ringback, connected
+        self.t_state = 0        # samples since the state began
+        self.pos = 0            # position in the music
         self._unload_stale()
-        name = "nmtlink_hold_%d" % os.getpid()
+        name = "nmtlink_net_%d" % os.getpid()
         self.modules = []
         self.modules.append(self._pactl("load-module", "module-null-sink",
                                         "sink_name=" + name, "channel_map=mono",
@@ -349,11 +367,77 @@ class HoldMusic:
         self.stop = False
         threading.Thread(target=self._play, daemon=True).start()
 
+    # call progress from osmocom's log
+    def on_line(self, text):
+        with self.lock:
+            if "Incoming call from" in text:            # the phone calls out
+                self._set("from_phone")
+            elif "Connect audio" in text:
+                self._set("ringback" if self.state == "from_phone" and self.rings
+                          else "connected")
+            elif ("Call disconnected" in text or "Call hangup" in text
+                  or "Entering IDLE state" in text):
+                self._set("idle")
+
+    def _set(self, state):
+        if state != self.state:
+            self.state, self.t_state = state, 0
+            if state == "connected":
+                self.pos = 0
+
+    def _block(self, n):
+        with self.lock:
+            state, t = self.state, self.t_state
+            if state == "ringback":
+                cycle = self.RING_ON + self.RING_OFF
+                end = (self.rings - 1) * cycle + self.RING_ON + 1.0
+                k = np.arange(t, t + n) / RATE
+                if k[0] >= end:
+                    self._set("connected")
+                    state = "connected"
+                else:
+                    on = (k % cycle < self.RING_ON) & (k < end - 1.0)
+                    x = np.sin(2 * np.pi * self.RING_HZ * k) * self.ring_level * on
+            if state == "connected":
+                if self.music is not None:
+                    idx = (self.pos + np.arange(n)) % len(self.music)
+                    x = self.music[idx]
+                    self.pos = (self.pos + n) % len(self.music)
+                elif self.mic:
+                    # 0.5 of full scale to osmocom's nominal, like the radio
+                    x = self.mic.read(n) * (CALL_NOMINAL / 0.5)
+                else:
+                    x = np.zeros(n)
+            elif state != "ringback":
+                x = np.zeros(n)
+                if self.mic:
+                    self.mic.read(n)        # keep it current
+            self.t_state += n
+        return x
+
+    def _play(self):
+        """20 ms at a time, at most AHEAD in front of the wall clock"""
+        t0, sent = time.monotonic(), 0
+        while not self.stop:
+            ahead = sent / RATE - (time.monotonic() - t0)
+            if ahead > self.AHEAD:
+                time.sleep(ahead - self.AHEAD)
+                continue
+            if ahead < -0.2:                # fell behind (stalled): resync
+                t0, sent = time.monotonic(), 0
+            x = self._block(BLOCK)
+            try:
+                self.p.stdin.write((np.clip(x, -1, 1) * 32767).astype("<i2").tobytes())
+                self.p.stdin.flush()
+            except (BrokenPipeError, ValueError, OSError):
+                break
+            sent += BLOCK
+
     @classmethod
     def _unload_stale(cls):
         """modules left by an nmtlink that was killed"""
         for line in cls._pactl("list", "short", "modules").splitlines():
-            m = re.search(r"nmtlink_hold_(\d+)", line)
+            m = re.search(r"nmtlink_(?:hold|net)_(\d+)", line)
             if m and not os.path.exists("/proc/" + m.group(1)):
                 subprocess.run(["pactl", "unload-module", line.split()[0]],
                                capture_output=True)
@@ -377,29 +461,23 @@ class HoldMusic:
             x = x.mean(axis=1)
         return signal.resample_poly(x, RATE, rate) if rate != RATE else x
 
-    def _play(self):
-        """blocking writes: the sink paces the loop"""
-        while not self.stop:
-            try:
-                self.p.stdin.write(self.x)
-                self.p.stdin.flush()
-            except (BrokenPipeError, ValueError, OSError):
-                break
-
     def close(self):
         self.stop = True
         stop(self.p)
+        if self.mic:
+            self.mic.close()
         for m in reversed(self.modules):
             subprocess.run(["pactl", "unload-module", m], capture_output=True)
 
 
-def call_device(net_audio=None, hold=None):
-    """osmocom's -c: the network's speaker/microphone, or with hold
-    music its playback part (null if none) and the music as capture"""
-    if not hold:
+def call_device(net_audio=None, net=None):
+    """osmocom's -c: the network's speaker/microphone (ALSA, "play/rec"
+    for two devices), or with a NetworkEnd its playback part (null if
+    none) and the NetworkEnd as capture"""
+    if not net:
         return net_audio
     play = (net_audio or "null").split("/")[0]
-    return "%s/%s" % (play, hold.device)
+    return "%s/%s" % (play, net.device)
 
 
 # ---- the phone's audio
@@ -688,6 +766,10 @@ def add_audio_args(ap):
     ap.add_argument("--radio-in", help="the phone's microphone (ALSA)")
     ap.add_argument("--hold-music", metavar="FILE",
                     help="the network plays FILE (looped) into calls (PipeWire)")
+    ap.add_argument("--rings", type=int, default=3,
+                    help="ringback (425 Hz) before a call from the phone is "
+                    "answered; 0 answers at once (default %(default)s, the first one partly before the earpiece opens; with "
+                    "--hold-music or --net-audio)")
     ap.add_argument("--ear-gain", type=float, default=0.8,
                     help="speech at nominal deviation comes out at 0.5 of full scale")
     ap.add_argument("--mic-gain", type=float, default=1.3,
@@ -697,11 +779,18 @@ def add_audio_args(ap):
 
 
 def open_audio(a):
-    """(ear, mic, hold, osmocom call device) from add_audio_args options"""
+    """(ear, mic, network end, osmocom call device) from add_audio_args
+    options.  The network's microphone (or hold music) always goes
+    through a NetworkEnd: ringback, and the same level scale as the
+    radio's devices; its speaker is osmocom's own (nominal speech at
+    0.112 of full scale)."""
     ear = SoundOut(a.radio_out) if a.radio_out else None
     mic = SoundIn(a.radio_in) if a.radio_in else None
-    hold = HoldMusic(a.hold_music) if a.hold_music else None
-    return ear, mic, hold, call_device(a.net_audio, hold)
+    net = None
+    if a.hold_music or a.net_audio:
+        rec = a.net_audio.split("/")[-1] if a.net_audio and not a.hold_music else None
+        net = NetworkEnd(a.hold_music, rec, a.rings)
+    return ear, mic, net, call_device(a.net_audio, net)
 
 
 def main():
@@ -746,10 +835,12 @@ def main():
     if not a.cold:
         warm_boot(r)
     t_wall = time.monotonic()
-    ear, mic, hold, calldev = open_audio(a)
+    ear, mic, net, calldev = open_audio(a)
     osmo = Osmocom(a.nmt, nmt_opts, calldev, a.osmo_log, a.verbose,
                    on_line=lambda s: print("%8.3f osmo %s" % (r.time(), s), flush=True))
-    s = Session(r, osmo, a.channel, a.prefill, ear=ear, mic=mic, hold=hold,
+    if net:
+        osmo.listeners.append(net.on_line)
+    s = Session(r, osmo, a.channel, a.prefill, ear=ear, mic=mic, hold=net,
                 log=lambda m: print(m, flush=True),
                 ear_gain=a.ear_gain, mic_gain=a.mic_gain,
                 compandor=not a.no_compandor)
