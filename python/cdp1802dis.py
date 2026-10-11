@@ -13,7 +13,7 @@ the rest is shown as bytes, or disassembled with '?' when --all is
 given.  A symbol file has lines "ADDR name [; comment]" (hex address).
 
     python3 cdp1802dis.py rom.bin [--cov cov.bin] [--syms md59.sym]
-                          [--from 0x0000 --to 0x7FFF] [--all]
+                          [--from 0x0000 --to 0x7FFF] [--all] [--scrt 4]
 """
 import argparse
 import re
@@ -44,14 +44,19 @@ def _r(n):
     return "r%X" % n
 
 
-def disasm(read, addr, cdp1806=True):
-    """(text, length, targets) for the instruction at addr."""
+def disasm(read, addr, cdp1806=True, scrt=None):
+    """(text, length, targets) for the instruction at addr.  scrt = the
+    SCRT call register (RCA convention: 'sep r4' is followed by the
+    2-byte subroutine address), shown as 'call ADDR'."""
     op = read(addr)
     hi, lo = op >> 4, op & 15
     b1 = read((addr + 1) & 0xFFFF)
     b2 = read((addr + 2) & 0xFFFF)
     if op == 0x00:
         return "idl", 1, []
+    if scrt is not None and op == 0xD0 | scrt:
+        t = b1 << 8 | b2
+        return "call %04X" % t, 3, [t]
     if hi in REGOP:
         return "%s %s" % (REGOP[hi], _r(lo)), 1, []
     if hi == 0x3:
@@ -123,7 +128,7 @@ def load_syms(path):
 
 
 def listing(rom, cov=None, syms=None, lo=0, hi=None, show_all=False,
-            cdp1806=True):
+            cdp1806=True, scrt=None):
     syms = syms or {}
     hi = len(rom) - 1 if hi is None else hi
 
@@ -138,7 +143,7 @@ def listing(rom, cov=None, syms=None, lo=0, hi=None, show_all=False,
     a = 0
     while a < len(rom):
         if covered(a):
-            _, n, ts = disasm(read, a, cdp1806)
+            _, n, ts = disasm(read, a, cdp1806, scrt)
             for t in ts:
                 refs.setdefault(t, []).append(a)
             a += n
@@ -157,7 +162,7 @@ def listing(rom, cov=None, syms=None, lo=0, hi=None, show_all=False,
             x = " ; from " + " ".join("%04X" % f for f in xr[:6]) + (" ..." if len(xr) > 6 else "") if xr else ""
             out.append("%s:%s%s" % (name(a), "  ; " + note if note else "", x))
         if covered(a) or show_all:
-            text, n, ts = disasm(read, a, cdp1806)
+            text, n, ts = disasm(read, a, cdp1806, scrt)
             for t in ts:
                 text = text.replace("%04X" % t, name(t)) if t in syms else text
             raw = " ".join("%02X" % read(a + i) for i in range(n))
@@ -187,11 +192,13 @@ def main():
     ap.add_argument("--to", dest="hi", type=lambda s: int(s, 0), default=None)
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--1802", dest="c1802", action="store_true")
+    ap.add_argument("--scrt", type=lambda s: int(s, 0), default=None,
+                    help="SCRT call register (e.g. 4: 'sep r4' + address)")
     a = ap.parse_args()
     rom = open(a.rom, "rb").read()
     cov = open(a.cov, "rb").read() if a.cov else None
     print(listing(rom, cov, load_syms(a.syms), a.lo, a.hi, a.all,
-                  cdp1806=not a.c1802))
+                  cdp1806=not a.c1802, scrt=a.scrt))
 
 
 if __name__ == "__main__":
