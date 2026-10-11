@@ -11,11 +11,14 @@
 #define O_SE     (0 * 4 + 0)	/* MD5x SE, ME59 TSE (offset PLL) */
 #define O_PHI    (1 * 4 + 2)
 #define O_CS     2		/* latch 2 bits 1..3 = CS1..CS3 */
+#define O_CS3    (2 * 4 + 3)	/* selects the programming module */
 #define O_RSE    (3 * 4 + 0)	/* ME59 main PLL strobe */
 #define O_HS     4		/* latch 4: bit 1 DP, bit 2 CLK */
 #define O_WDR    (5 * 4 + 0)
 #define O_SWE    (6 * 4 + 0)
 #define O_PSC    (6 * 4 + 3)
+#define O_EDI    (6 * 4 + 2)	/* MD59/ME59 EEPROM DI */
+#define O_EECS   (4 * 4 + 0)	/* MD59/ME59 EEPROM CS (MD50: OFF1) */
 #define O_XM     (7 * 4 + 0)
 
 #define LBIT(m, b) (((m)->latch[(b) >> 2] >> ((b) & 3)) & 1)
@@ -83,6 +86,33 @@ md5x_event_pop(md5x *m, md5x_event *e)
 	return 1;
 }
 
+static void
+iolog(md5x *m, int kind, int n, uint16_t a, uint8_t v)
+{
+	if (!m->iolog)
+		return;
+	md5x_io *e = &m->iolog[m->io_n++ % MD5X_IOLOG];
+	e->at = m->clk;
+	e->pc = m->pc;
+	e->addr = a;
+	e->kind = (uint8_t)kind;
+	e->n = (uint8_t)n;
+	e->val = v;
+}
+
+void
+md5x_iolog(md5x *m, int on, int memw)
+{
+	if (on && !m->iolog)
+		m->iolog = calloc(MD5X_IOLOG, sizeof(*m->iolog));
+	else if (!on) {
+		free(m->iolog);
+		m->iolog = NULL;
+	}
+	m->io_n = 0;
+	m->io_memw = (uint8_t)memw;
+}
+
 /* ---------------------------------------------------------------- inputs */
 
 /* TOFF ("no RF output") follows the transmitter: active while XM is
@@ -111,19 +141,49 @@ parallel_inputs(const md5x *m)
 	return v;
 }
 
+/* programming module: after CLK edge c (1-based), group (c-1)/5,
+ * position (c-1)%5; position 0 loads the nibble, 1..4 show bits 3..0 */
+static int
+progmodule_dcu(const md5x *m)
+{
+	if (!m->pm_n || !m->pm_clk)
+		return 1;
+	unsigned g = (m->pm_clk - 1) / 5, p = (m->pm_clk - 1) % 5;
+	if (!p || g >= m->pm_n)
+		return 1;
+	return (m->pm_nib[g] >> (4 - p)) & 1;
+}
+
+void
+md5x_progmodule(md5x *m, const uint8_t *nibbles, int n)
+{
+	if (n > (int)sizeof(m->pm_nib))
+		n = (int)sizeof(m->pm_nib);
+	m->pm_n = (uint8_t)(n > 0 ? n : 0);
+	for (int i = 0; i < m->pm_n; i++)
+		m->pm_nib[i] = nibbles[i] & 15;
+	m->pm_clk = 0;
+}
+
 static uint8_t
 ef(void *ctx)
 {
 	md5x *m = ctx;
 	uint8_t f = 0;
-	/* /EF1 = DCU (handset serial data) */
-	if (!cu53an_dcu(&m->hs))
+	/* /EF1 = DCU (handset serial data, or the programming module
+	 * while CS3 is set; nothing there pulls it high) */
+	if (LBIT(m, O_CS3) ? !progmodule_dcu(m) : !cu53an_dcu(&m->hs))
 		f |= 1;
 	/* /EF2: MD59 RF_OFF (TOFF, low = output present, per OH1E's
 	 * input_register); MD50 high (production-test link open); ME59
 	 * EEPROM data, idle high */
 	if (m->model == MD5X_MD59 && !toff(m))
 		f |= 2;
+	/* 93C06 DO: MD59 on /EF4 with /PTT (OH3NWQ; the original MD59
+	 * firmware reads it there), ME59 on /EF2 (manual); high-Z with a
+	 * pull-up while CS is low */
+	if (m->model != MD5X_MD50 && m->ee.cs && !m->ee.dout)
+		f |= m->model == MD5X_MD59 ? 8 : 2;
 	/* /EF3 = 4021 Q8; PL is asynchronous, so Q8 = DA while PSC = 1 */
 	uint8_t q8 = LBIT(m, O_PSC) ? (uint8_t)cu53an_da(&m->hs) : m->sr >> 7;
 	if (!q8)
@@ -134,10 +194,114 @@ ef(void *ctx)
 	return f;
 }
 
+/* ---------------------------------------------------------------- 93C06 */
+
+enum { EE_IDLE, EE_CMD, EE_READ, EE_WDATA, EE_WRAL, EE_DONE };
+
+static void
+ee_write(md5x *m, int a, uint16_t v)
+{
+	m->ee.word[a & 15] = v;
+	event(m, MD5X_EV_EEPROM, a & 15);
+}
+
+/* SK rising edge (Q) while CS is high.  Instruction: start bit 1, two
+ * opcode bits, six address bits (A5, A4 ignored), as on the 93C46. */
+static void
+ee_clock(md5x *m)
+{
+	md5x_eeprom *e = &m->ee;
+	int di = LBIT(m, O_EDI);
+	switch (e->state) {
+	case EE_IDLE:
+		if (di) {
+			e->state = EE_CMD;
+			e->n = 0;
+			e->sr = 0;
+		}
+		break;
+	case EE_CMD:
+		e->sr = (uint16_t)((e->sr << 1) | di);
+		if (++e->n < 8)
+			break;
+		e->addr = e->sr & 15;
+		e->n = 0;
+		switch ((e->sr >> 6) & 3) {
+		case 2:					/* READ */
+			e->state = EE_READ;
+			e->sr = e->word[e->addr];
+			e->dout = 0;			/* dummy 0 */
+			break;
+		case 1:					/* WRITE */
+			e->state = EE_WDATA;
+			e->sr = 0;
+			break;
+		case 3:					/* ERASE */
+			if (e->ewen)
+				ee_write(m, e->addr, 0xffff);
+			e->state = EE_DONE;
+			break;
+		default:
+			switch ((e->sr >> 4) & 3) {
+			case 3: e->ewen = 1; e->state = EE_DONE; break;
+			case 0: e->ewen = 0; e->state = EE_DONE; break;
+			case 2:				/* ERAL */
+				if (e->ewen)
+					for (int a = 0; a < 16; a++)
+						ee_write(m, a, 0xffff);
+				e->state = EE_DONE;
+				break;
+			case 1:				/* WRAL */
+				e->state = EE_WRAL;
+				e->sr = 0;
+				break;
+			}
+		}
+		break;
+	case EE_READ:
+		e->dout = (e->sr >> 15) & 1;
+		e->sr = (uint16_t)(e->sr << 1);
+		if (++e->n == 16) {			/* sequential read */
+			e->n = 0;
+			e->addr = (e->addr + 1) & 15;
+			e->sr = e->word[e->addr];
+		}
+		break;
+	case EE_WDATA:
+	case EE_WRAL:
+		e->sr = (uint16_t)((e->sr << 1) | di);
+		if (++e->n < 16)
+			break;
+		if (e->ewen) {
+			if (e->state == EE_WRAL)
+				for (int a = 0; a < 16; a++)
+					ee_write(m, a, e->sr);
+			else
+				ee_write(m, e->addr, e->sr);
+		}
+		e->state = EE_DONE;
+		e->dout = 1;				/* ready (writes are instant) */
+		break;
+	}
+}
+
+static void
+ee_cs(md5x *m, int cs)
+{
+	md5x_eeprom *e = &m->ee;
+	if (cs == e->cs)
+		return;
+	e->cs = (uint8_t)cs;
+	e->state = EE_IDLE;
+	e->dout = 1;
+}
+
 static void
 qout(void *ctx, int level)
 {
 	md5x *m = ctx;
+	if (level && m->model != MD5X_MD50 && m->ee.cs)
+		ee_clock(m);
 	/* Q clocks the 4021: shift on the rising edge while PSC = 0 */
 	if (level && !LBIT(m, O_PSC))
 		m->sr = (uint8_t)((m->sr << 1) | pin_level(m, 7));
@@ -266,9 +430,18 @@ latch_write(md5x *m, int n, uint8_t v)
 		break;
 	case 2:
 	case 4:
-		handset_bus(m);
+		if (n == 2 && (rose & 8))
+			m->pm_clk = 0;			/* module selected */
+		if (LBIT(m, O_CS3)) {
+			if (n == 4 && (rose & 4))
+				m->pm_clk++;
+		} else {
+			handset_bus(m);
+		}
 		if (n == 4 && m->model == MD5X_MD50 && (rose & 1))
 			power_off(m);			/* MD50 OFF1 */
+		if (n == 4 && m->model != MD5X_MD50)
+			ee_cs(m, v & 1);
 		break;
 	case 3:
 		if (m->model == MD5X_ME59 && (rose & 1))
@@ -350,6 +523,8 @@ mem_write(void *ctx, uint16_t a, uint8_t v)
 		}
 		return;
 	}
+	if (m->io_memw)
+		iolog(m, MD5X_IO_MEMW, 0, a, v);
 	if (m->model == MD5X_ME59) {
 		if (a >= 0xe000) {
 			m->adc_result = m->adc[a & 7];	/* start conversion */
@@ -360,10 +535,20 @@ mem_write(void *ctx, uint16_t a, uint8_t v)
 	}
 }
 
+static uint8_t io_read(md5x *m, int n, uint16_t a);
+
 static uint8_t
 io_in(void *ctx, int n, uint16_t a)
 {
 	md5x *m = ctx;
+	uint8_t v = io_read(m, n, a);
+	iolog(m, MD5X_IO_INP, n, a, v);
+	return v;
+}
+
+static uint8_t
+io_read(md5x *m, int n, uint16_t a)
+{
 	uint8_t v = 0xff;
 	if (n & 1) {
 		if (m->model == MD5X_ME59)
@@ -387,6 +572,7 @@ static void
 io_out(void *ctx, int n, uint16_t a, uint8_t v)
 {
 	md5x *m = ctx;
+	iolog(m, MD5X_IO_OUT, n, a, v);
 	if (n & 1) {
 		if (m->model == MD5X_ME59)
 			pit_write(&m->pit, a & 3, v);
@@ -457,6 +643,8 @@ md5x_init(md5x *m, int model, int cu, unsigned ram_size)
 	m->watch_lo = 1;
 	m->watch_hi = 0;
 	m->modem.next_tick = (uint64_t)(m->cpu_hz / 100);
+	memset(m->ee.word, 0xff, sizeof(m->ee.word));	/* erased */
+	m->ee.dout = 1;
 	board_reset(m);
 }
 
@@ -612,6 +800,13 @@ md5x_step(md5x *m)
 	}
 	uint16_t pc = m->cpu.r[m->cpu.p];
 	m->trace[m->trace_pos++ % MD5X_TRACE] = pc;
+	m->pc = pc;
+	if (pc < 0x8000 && !m->cpu.idle) {
+		m->cov[pc >> 3] |= (uint8_t)(1 << (pc & 7));
+		uint8_t op = m->rom[pc];
+		if (m->iolog && (op & 0xf4) == 0x34)	/* B1-4 / BN1-4 */
+			iolog(m, MD5X_IO_EF, (op & 3) + 1, 0, ef(m));
+	}
 	unsigned cyc = cdp1802_step(&m->cpu);
 	if (m->cpu.illegal)
 		event(m, MD5X_EV_ILLEGAL, pc);

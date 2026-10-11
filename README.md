@@ -29,7 +29,7 @@ submodule.
 | R58 board | `r58.c`: P8E/P8N memory maps incl. the banked ROM window, and the RB58VY L8M board (EEPROM, one-board I/O map, S8M synth; runs OH5NXO's R58bis for L8M; the original Nokia ROM lacks EPROM1: [notes/r58.md](notes/r58.md)), I/O, ADC/DACs, latches, watchdog, power, FX429 modem at byte level, synthesizer capture, tone pin edges, breakpoints and watchpoints |
 | API | `api.c` flat C API (`libr58.so`); `python/r58emu.py` ctypes harness (`Radio`); `python/r58tui.py` terminal UI; `python/afsk.py` AX.25 decoder |
 | CDP1802 core | `cdp1802.c`: CDP1802 and CDP1806 (68xx instructions, counter/timer), exact machine cycles. Unit test, no exerciser |
-| Talkman board | `md5x.c`: MD50/MD59/ME59 memory maps, output latches, 4021 inputs, MAS7205 modem (100 Hz timer interrupt), synth capture, watchdog, ME59 ADC/DAC/8253; `md5x_api.c` (`libmd5x.so`), `python/md5xemu.py` harness, `python/md5xtui.py` terminal UI. Boots OH3NWQ mx5x v3.183 and OH1E #42 on all three models: [notes/md5x.md](notes/md5x.md) |
+| Talkman board | `md5x.c`: MD50/MD59/ME59 memory maps, output latches, 4021 inputs, MAS7205 modem (100 Hz timer interrupt), synth capture, watchdog, ME59 ADC/DAC/8253; `md5x_api.c` (`libmd5x.so`), `python/md5xemu.py` harness, `python/md5xtui.py` terminal UI. 93C06 ID EEPROM and the OK 59 programming module. Boots OH3NWQ mx5x v3.183 and OH1E #42 on all three models, and the original Nokia MD59 NMT-450 firmware up to its calling-channel scan: [notes/md5x.md](notes/md5x.md) |
 | MC25 board | `mc25.c`, `cu41.c`: KL1 ports, 1 ms interrupt, CU41 display and keypad, CCIR at digit level, soft-UART; `mc25_api.c` (`libmc25.so`), `python/mc25emu.py`, `python/mc25tui.py`. Runs OH5NXO/OH3NWQ mc25.asm v3.6: [notes/mc25.md](notes/mc25.md) |
 | uPD7810 core | `upd7810.c`: uPD7810/78C10 instruction set with data-sheet state counts, timers, event counter, async serial, A/D, edge flags, interrupts. Unit test; decoder checked against as7810 on every instruction form |
 | H8/500 core | `h8500.c` (maximum mode) and `h8532.c` (H8/532 ports, FRT1-3, 8-bit timer, SCI, A/D, WDT, interrupt controller). Unit test |
@@ -79,6 +79,7 @@ hash of what was published on 2026-10-02:
 | `r58p8x3Z.bin.als`, `r58.asm.als`: R58 v3_Z ALs by OH1E / OH5NXO | titanix.net/DMR/r58/ | no licence given |
 | `rc40_rom/ABSBIN`: original Nokia RC40 firmware Cr 13.04-0 (1993), streamed out of OH5NXO's 339 MB archive `oh5nxo.mods.2018.tar.gz` | oh3tr.fi/~ftp/modifications/sorsat/ | Nokia's; for testing only, never redistribute |
 | `MDR150/hamdr/hamdr.hex`, `bootstrap`: HaMDR 174 (2012) and the MDR150 bootstrap (2009) by OH5NXO, from the same archive, in the same pass | oh3tr.fi/~ftp/modifications/sorsat/ | no licence given |
+| `Mx5x/orig/MD59SB.raw.orig`, `na0`, `na1`: original Nokia Talkman MD59 and MD50 NMT-450 firmware (OH5NXO's 1997 dumps), from the same archive, in the same pass | oh3tr.fi/~ftp/modifications/sorsat/ | Nokia's; for testing only, never redistribute |
 | `R58vy/rom.0`: original Nokia RB58VY EPROM0; `R58bis/R58/L8M.bin`: OH5NXO's R58bis for L8M (2014), from the same archive, in the same pass | oh3tr.fi/~ftp/modifications/sorsat/ | Nokia's (testing only, never redistribute); OH5NXO's: no licence given |
 
 The assemblers are OH5NXO's "jas", with no licence statement. Fetching a

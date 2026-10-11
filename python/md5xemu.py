@@ -22,7 +22,8 @@ HANDSETS = {"CU53": 0, "CU59": 1}
 INPUTS = ["poweroff", "toff", "offhook", "lowbatt", "ptt", "local",
           "portable", "coldstart", "ign", "ac"]
 EVENTS = {1: "WDRESET", 2: "POWEROFF", 3: "POWERON", 4: "TX_ON", 5: "TX_OFF",
-          6: "SYNTH", 7: "MODEM_TX", 8: "LCD", 9: "DAC", 10: "ILLEGAL"}
+          6: "SYNTH", 7: "MODEM_TX", 8: "LCD", 9: "DAC", 10: "ILLEGAL",
+          11: "EEPROM"}
 STOP = {0: "time", 1: "break", 2: "watch", 3: "off"}
 
 # raw handset key codes (MM74C923 code; 0x20 = the extra D5 bit), named
@@ -101,6 +102,13 @@ def lib():
             "md5xapi_audio": (C.c_int, [vp, C.c_int, C.POINTER(C.c_double),
                                         C.c_char_p]),
             "md5xapi_audio_count": (C.c_int, [vp]),
+            "md5xapi_eeprom": (None, [vp, C.POINTER(C.c_uint16),
+                                      C.POINTER(C.c_uint16)]),
+            "md5xapi_progmodule": (None, [vp, C.c_char_p, C.c_int]),
+            "md5xapi_coverage": (None, [vp, C.c_char_p, C.c_int]),
+            "md5xapi_iolog": (None, [vp, C.c_int, C.c_int]),
+            "md5xapi_iolog_take": (C.c_int, [vp, C.c_int,
+                                             C.POINTER(C.c_double), ip]),
         }
         for name, (res, args) in sig.items():
             f = getattr(L, name)
@@ -274,6 +282,45 @@ class Radio:
         out = (C.c_int * n)()
         k = self.L.md5xapi_trace(self.m, n, out)
         return list(out[:k])
+
+    def eeprom(self, words=None):
+        """93C06 contents as 16 words; with words, load them first."""
+        buf = (C.c_uint16 * 16)()
+        if words is not None:
+            src = (C.c_uint16 * 16)(*words)
+            self.L.md5xapi_eeprom(self.m, None, src)
+        self.L.md5xapi_eeprom(self.m, buf, None)
+        return list(buf)
+
+    def progmodule(self, nibbles=(0, 0, 0, 0, 0, 5, 0xA)):
+        """Fit the OK 59 / TK 59 programming module (original MD59
+        firmware: the last two nibbles 5, A grant programming rights);
+        None removes it."""
+        nib = bytes(nibbles or ())
+        self.L.md5xapi_progmodule(self.m, nib, len(nib))
+
+    def coverage(self, clear=False):
+        """ROM coverage bitmap (4096 bytes): bit a&7 of byte a>>3 is set
+        when address a was executed as an opcode."""
+        buf = C.create_string_buffer(4096)
+        self.L.md5xapi_coverage(self.m, buf, 1 if clear else 0)
+        return buf.raw
+
+    IO_KINDS = {1: "OUT", 2: "INP", 3: "EF", 4: "MEMW"}
+
+    def iolog(self, on=True, memw=False):
+        """Log OUT/INP, EF reads by B/BN instructions (val = EF bits,
+        bit k = EF(k+1) true) and, with memw, writes outside RAM."""
+        self.L.md5xapi_iolog(self.m, 1 if on else 0, 1 if memw else 0)
+
+    def iolog_take(self, max_n=65536):
+        """[(t, pc, kind, n, addr, val)] oldest first; clears the log."""
+        at = (C.c_double * max_n)()
+        out = (C.c_int * (max_n * 5))()
+        k = self.L.md5xapi_iolog_take(self.m, max_n, at, out)
+        return [(at[i], out[i * 5], self.IO_KINDS[out[i * 5 + 1]],
+                 out[i * 5 + 2], out[i * 5 + 3], out[i * 5 + 4])
+                for i in range(k)]
 
     # ---- outputs
 

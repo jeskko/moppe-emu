@@ -13,7 +13,8 @@ Hardware facts and sources are in the firmware repo's `notes/md5x.md`.
 | Board | `md5x.c` | Memory maps, N0/N1/N2 I/O decode, eight 4-bit output latches (OUT 4, latch from R(X) bits 3..1), 4021 input chain (Q clock, PSC load, /EF3), MAS7205 modem at register level, serial synth capture, watchdog, OFF1 power-off, ME59 ADC/DAC/8253, MD50 WAIT (N0) |
 | Handset | `cu53an.c` | Same chain/LCD protocol as the R58 CU53AN; parallel-load bit 1 (`bit1`) is the Talkman D5 key bit, idle 1 on CU53, 0 on CU59 |
 | API | `md5x_api.c` → `libmd5x.so`; `python/md5xemu.py`; `python/md5xtui.py` (curses, or `--script` headless) | `Radio(rom, listing, model, cu)`; as06 listing symbols; LCD text decoded with the ROM's own `font` table |
-| Tests | `tests/md5x/` (`make test-md5x`) | `roms.py` builds six firmware images from the reference sources (`make refs`, or the firmware repo's `reference/md5x/`) with as06; `test_md5x.py` (13 scenarios). Skip if the sources or a 32-bit runtime are missing |
+| Tests | `tests/md5x/` (`make test-md5x`) | `roms.py` builds six firmware images from the reference sources (`make refs`, or the firmware repo's `reference/md5x/`) with as06; `test_md5x.py` (13 scenarios). `test_md59orig.py` (4): the original Nokia MD59 ROM, see below. Skip if the sources, the dump or a 32-bit runtime are missing |
+| RE aids | `md5x.c`, `python/cdp1802dis.py` | ROM coverage bitmap (`Radio.coverage()`), I/O log of OUT/INP, B/BN flag reads and non-RAM writes with their PC (`iolog()`, `iolog_take()`); disassembler for 1802/1806 that lists covered addresses as code and takes a symbol file |
 
 Time is in CPU clock periods (3.6864 MHz MD5x, 4.8 MHz ME59); peripherals
 advance after each instruction.
@@ -35,6 +36,8 @@ advance after each instruction.
 | Synth | while SWE: each memory write clocks D7 (MD5x) / D0 (ME59), inverted. MD5x SE strobe: SW1 SW2 N9..N0 A6..A0, VCO = (80N+A)·25 kHz; ME59 RSE: SW1 SW2 b16..b0 (12.5 kHz units); ME59 TSE: offset PLL N, A (32/33) | mx5x `txsynth`, `dooffset`; PE2A ("SWE gates D7 and MWR") |
 | Watchdog | counts while WDR = 0; /CLEAR after 106 ms (MD5x) / 213 ms (ME59); resets CPU, modem, latches | PE2A text (106/213 ms, maybe off by 2), ME59 manual, OH1E "level active, 1 resets the count" |
 | Power | OFF1 rising edge: MD50 latch 4 bit 0, MD59 latch 3 bit 1, ME59 latch 7 bit 1 | sources |
+| 93C06 EEPROM (MD59, ME59) | CS = latch 4 bit 0 (EECS), SK = Q (shared with the 4021 clock), DI = latch 6 bit 2 (EDI), DO on /EF4 with /PTT (MD59) or /EF2 (ME59), high (pull-up) while CS is low. 93C46-style instructions: start bit, 2 opcode bits, 6 address bits (A5, A4 ignored); READ (dummy 0, then D15..D0, sequential), WRITE, ERASE, EWEN/EWDS, ERAL/WRAL; writes are instant (DO = ready). Erased (FFFF) at creation; `Radio.eeprom()` gets/sets it; EEPROM event per word written | the original MD59 firmware's driver (0x3C26-0x3DC1), mx5x pin names, ME59 manual |
+| Programming module (OK 59 / TK 59) | selected by CS3 (latch 2 bit 3, never set by the ham firmwares); while CS3 is set the handset bus is not driven. Nibbles out on DCU, MSB first; one CLK (latch 4 bit 2) rising edge loads each nibble, then one per bit. `Radio.progmodule(nibbles)`; the default (0,0,0,0,0,5,A) gives programming rights | the original MD59 firmware (0x4173 reads 7 nibbles into 0x8024 and wants 0x5A); its hardware is unknown |
 
 ## Fidelity evidence
 
@@ -51,6 +54,17 @@ advance after each instruction.
 - All six builds run 5 s without a watchdog reset or an undefined
   opcode; the modem timer gives 500 ticks in 5 s.
 
+## Original Nokia MD59 firmware
+
+`MD59SB.raw.orig` (NMT-450, 1806 code; facts in the firmware repo's
+`notes/nmt.md`). With an erased EEPROM it powers itself off at 1.77 s;
+in LOCAL it shows "LOCAL / Error 10" (EEPROM unprogrammed, as the ME59
+manual lists). With the programming module fitted, the manual's LOCAL
+commands program it: `71#` date, `72#` number (Z X1..X6, no password
+field), `73#` lock code, each ended with STO; `81#`-`83#` read them back;
+`90#` leaves LOCAL. Programmed, it boots in NMT mode and scans
+calling channels (synth div = 19375 + channel, about 75 per second).
+
 ## Known limits
 
 | Item | State |
@@ -59,7 +73,8 @@ advance after each instruction.
 | No CPU exerciser | no zexall equivalent for the 1802; unit tests + firmware runs only |
 | IDL | left on any interrupt request, even with IE = 0 (1802 docs unclear) |
 | FFSK | byte level, no bit timing beyond 1 byte = 8/1200 s for TFLAG; no hunt mode/sync |
-| 93C06 EEPROM, MD50 PROM A4-A7 | not modelled (neither firmware uses the EEPROM) |
+| MD50 PROM A4-A7 | not modelled |
+| 93C06 write time, busy status | writes are instant |
 | 8253 GATE1 (inverted OUT0), OH1E's 455 kHz AFC measurement | gate not modelled |
 | Tone outputs | only one latch bit captured at a time (`audio_capture(bit=)`, default PHI); OH1E's CTCSS DAC in the PROM socket not modelled |
 | Watchdog OFF3 | not modelled |

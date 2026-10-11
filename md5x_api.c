@@ -15,7 +15,7 @@ md5xapi_new(int model, int cu, int ram_size)
 	return m;
 }
 
-void   md5xapi_free(md5x *m) { free(m->aud_t); free(m->aud_v); free(m); }
+void   md5xapi_free(md5x *m) { free(m->aud_t); free(m->aud_v); free(m->iolog); free(m); }
 int    md5xapi_load_rom(md5x *m, const char *p) { return md5x_load_rom(m, p); }
 void   md5xapi_power(md5x *m, int on) { md5x_power(m, on); }
 int    md5xapi_powered(md5x *m) { return m->powered; }
@@ -153,3 +153,49 @@ md5xapi_audio(md5x *m, int max, double *t, uint8_t *v)
 }
 
 int md5xapi_audio_count(md5x *m) { return (int)m->aud_n; }
+
+/* ROM coverage bitmap (4096 bytes, bit a&7 of byte a>>3) */
+void md5xapi_coverage(md5x *m, uint8_t *out, int clear)
+{
+	memcpy(out, m->cov, sizeof(m->cov));
+	if (clear)
+		memset(m->cov, 0, sizeof(m->cov));
+}
+
+void md5xapi_iolog(md5x *m, int on, int memw) { md5x_iolog(m, on, memw); }
+
+/* oldest-first copy of the I/O log: at (s), pc, kind, n, addr, val;
+ * returns count and clears the log */
+int
+md5xapi_iolog_take(md5x *m, int max, double *at, int *out)
+{
+	if (!m->iolog)
+		return 0;
+	unsigned n = m->io_n < MD5X_IOLOG ? m->io_n : MD5X_IOLOG;
+	unsigned first = m->io_n - n;
+	if ((int)n > max)
+		n = (unsigned)max;
+	for (unsigned i = 0; i < n; i++) {
+		md5x_io *e = &m->iolog[(first + i) % MD5X_IOLOG];
+		at[i] = (double)e->at / m->cpu_hz;
+		out[i * 5 + 0] = e->pc;
+		out[i * 5 + 1] = e->kind;
+		out[i * 5 + 2] = e->n;
+		out[i * 5 + 3] = e->addr;
+		out[i * 5 + 4] = e->val;
+	}
+	m->io_n = 0;
+	return (int)n;
+}
+
+/* 93C06 contents, 16 words; out/in may be NULL */
+void
+md5xapi_eeprom(md5x *m, uint16_t *out, const uint16_t *in)
+{
+	if (out)
+		memcpy(out, m->ee.word, sizeof(m->ee.word));
+	if (in)
+		memcpy(m->ee.word, in, sizeof(m->ee.word));
+}
+
+void md5xapi_progmodule(md5x *m, const uint8_t *nib, int n) { md5x_progmodule(m, nib, n); }

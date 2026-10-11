@@ -53,6 +53,7 @@ enum {
 	MD5X_EV_LCD,		/* display frame loaded */
 	MD5X_EV_DAC,		/* ME59 AFC DAC written; arg = value */
 	MD5X_EV_ILLEGAL,	/* undefined opcode; arg = PC */
+	MD5X_EV_EEPROM,		/* 93C06 word written; arg = word address */
 };
 
 typedef struct md5x_event {
@@ -73,6 +74,14 @@ typedef struct md5x_synth {
 	int      last_nbits;	/* bits in the last strobed frame */
 } md5x_synth;
 
+/* 93C06 serial EEPROM (MD59, ME59): 16 x 16 bits */
+typedef struct md5x_eeprom {
+	uint16_t word[16];
+	uint8_t  state, n, ewen, cs, dout;
+	uint16_t sr;		/* command / data shift register */
+	uint8_t  addr;
+} md5x_eeprom;
+
 typedef struct md5x_modem {
 	uint8_t ctrl;
 	uint8_t stat;		/* RFLAG HM TFLAG TXE FFSK CFLAG (GPIN live) */
@@ -84,6 +93,15 @@ typedef struct md5x_modem {
 
 #define MD5X_EVQ 1024
 #define MD5X_TRACE 4096
+#define MD5X_IOLOG 65536
+
+/* I/O log entry (reverse engineering aid, off by default) */
+enum { MD5X_IO_OUT = 1, MD5X_IO_INP, MD5X_IO_EF, MD5X_IO_MEMW };
+typedef struct md5x_io {
+	uint64_t at;
+	uint16_t pc, addr;
+	uint8_t  kind, n, val;
+} md5x_io;
 
 typedef struct md5x {
 	int      model, cu;
@@ -104,6 +122,14 @@ typedef struct md5x {
 	uint8_t  waiting;	/* MD50 N0: WAIT until /INT */
 
 	md5x_modem modem;
+	md5x_eeprom ee;
+
+	/* OK 59 / TK 59 programming module on the handset bus (CS3), as the
+	 * original MD59 firmware reads it: nibbles, MSB first on DCU, one
+	 * extra CLK pulse before each nibble.  n = 0: not fitted. */
+	uint8_t  pm_nib[16];
+	uint8_t  pm_n;
+	unsigned pm_clk;	/* CLK rising edges since selected */
 	int      squelch_open;	/* MAS7205 GPIN2 on MD5x (SQ) */
 	double   rx_tone_hz;	/* GPIN1: clipped RX audio, 0 = none */
 
@@ -132,6 +158,11 @@ typedef struct md5x {
 
 	uint16_t trace[MD5X_TRACE];
 	unsigned trace_pos;
+	uint16_t pc;		/* address of the instruction being executed */
+	uint8_t  cov[32768 / 8];	/* ROM addresses executed as opcodes */
+	md5x_io  *iolog;	/* ring, MD5X_IOLOG entries, NULL = off */
+	unsigned io_n;		/* entries written since enabled */
+	uint8_t  io_memw;	/* also log writes outside RAM */
 	uint8_t  bp[65536 / 8];
 	int      nbp;
 	uint8_t  skip_bp;
@@ -155,5 +186,7 @@ void   md5x_modem_rx(md5x *m, uint8_t byte);
 int    md5x_event_pop(md5x *m, md5x_event *e);
 void   md5x_audio_capture(md5x *m, int on);
 void   md5x_breakpoint(md5x *m, uint16_t a, int on);
+void   md5x_iolog(md5x *m, int on, int memw);
+void   md5x_progmodule(md5x *m, const uint8_t *nibbles, int n);
 
 #endif
