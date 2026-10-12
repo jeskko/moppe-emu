@@ -13,7 +13,7 @@ Hardware facts and sources are in the firmware repo's `notes/md5x.md`.
 | Board | `md5x.c` | Memory maps, N0/N1/N2 I/O decode, eight 4-bit output latches (OUT 4, latch from R(X) bits 3..1), 4021 input chain (Q clock, PSC load, /EF3), MAS7205 modem at register level, serial synth capture, watchdog, OFF1 power-off, ME59 ADC/DAC/8253, MD50 WAIT (N0) |
 | Handset | `cu53an.c` | Same chain/LCD protocol as the R58 CU53AN; parallel-load bit 1 (`bit1`) is the Talkman D5 key bit, idle 1 on CU53, 0 on CU59 |
 | API | `md5x_api.c` → `libmd5x.so`; `python/md5xemu.py`; `python/md5xtui.py` (curses, or `--script` headless) | `Radio(rom, listing, model, cu)`; as06 listing symbols; LCD text decoded with the ROM's own `font` table |
-| Tests | `tests/md5x/` (`make test-md5x`) | `roms.py` builds six firmware images from the reference sources (`make refs`, or the firmware repo's `reference/md5x/`) with as06; `test_md5x.py` (13 scenarios). `test_md59orig.py` (7): the original Nokia MD59 ROM, see below. Skip if the sources, the dump or a 32-bit runtime are missing |
+| Tests | `tests/md5x/` (`make test-md5x`) | `roms.py` builds six firmware images from the reference sources (`make refs`, or the firmware repo's `reference/md5x/`) with as06; `test_md5x.py` (13 scenarios). `test_md59orig.py` (10): the original Nokia MD59 ROM and the MD50 dumps (PROM, checksum, scan), see below; `test_nmt_audio.py` (8): Hagelbarger, FFSK, air while off, compandor, ringback. Skip if the sources, the dump or a 32-bit runtime are missing |
 | RE aids | `md5x.c`, `python/cdp1802dis.py` | ROM coverage bitmap (`Radio.coverage()`), I/O log of OUT/INP, B/BN flag reads and non-RAM writes with their PC (`iolog()`, `iolog_take()`); disassembler for 1802/1806 that lists covered addresses as code and takes a symbol file |
 
 Time is in CPU clock periods (3.6864 MHz MD5x, 4.8 MHz ME59); peripherals
@@ -25,7 +25,7 @@ advance after each instruction.
 |---|---|---|
 | ROM | 0000-7FFF | PE2A text; ME59 manual |
 | RAM | MD50 1 KB mirrored in 8000-BFFF; MD59/ME59 2 KB (or 8 KB) mirrored in 8000-9FFF | PE2A (8000-83FF), ME59 manual; mirroring is assumed from the partial decode |
-| MD50 ID PROM | C000-FFFF, 4 bits, 0xFF unless loaded | PE2A/AP1; its A4-A7 come from latches (not modelled) |
+| MD50 ID PROM | C000-FFFF, 4 bits, 0xFF unless loaded (`Radio.prom(nibbles)`, blank = 0); A0-A3 from the bus, A4-A6 from latch 7 bits 1-3, A7 from latch 6 bit 1 | PE2A/AP1 (A4-A7 from latches); the bits from the original MD50 firmware's reader (0x4CB3) |
 | ME59 | A000 AFC DAC (event), E000-E007 ADC (write starts, read returns the last conversion), 8253 on N0 (CLK0 = TPB, CLK1 = 455 kHz, CLK2 = 19.2 kHz; gates high) | ME59 manual, OH1E `me59_init` |
 | N lines | decoded one per line: N0 (1) MD50 WAIT / ME59 8253, N1 (2) modem, N2 (4) latches | PE2A text, firmware constants HLT/TMR=1, MDM=2, REG=4 |
 | Modem | status RFLAG HM TFLAG TXE FFSK CFLAG GPIN1 GPIN2; control RINTE TINTE CINTE .. CCF CRTF; 100 Hz CFLAG timer; /INT = enabled flags; data byte level | OH5NXO `MAS.registers` (valid for 7205 and 7825), PE2A text |
@@ -76,7 +76,11 @@ Against osmocom-analog's NMT base station (`tools/osmocom-analog/run-nmt.sh`,
 `-k 1 -Y DK,1`), linked in step through FIFOs, it completes a **roaming
 update**: seizure, identity request, identity confirm (password "aaa":
 its K digits are unprogrammed zeros), roaming updating confirmation,
-release, release guard; the phone then shows SERV without ROAM.
+release, release guard; the phone then shows SERV without ROAM. Since
+then it makes and receives calls with speech, also in real time and
+from `md5xtui.py --nmt`; the original **MD50** firmware (na0+na1, ID
+PROM, its dump corrected on load) does the same. Details, recipes and
+tools: the firmware repo's `notes/nmt.md`.
 
 ## Known limits
 
@@ -85,8 +89,7 @@ release, release guard; the phone then shows SERV without ROAM.
 | 68xx cycle counts | from the CDP1805 user manual's table as remembered; the Harris data sheet extract in hand has no table. OH1E uses only STPC/LDC/STM/CIE/CID (no timing-critical 68xx) |
 | No CPU exerciser | no zexall equivalent for the 1802; unit tests + firmware runs only |
 | IDL | left on any interrupt request, even with IE = 0 (1802 docs unclear) |
-| FFSK | bit level in the board (ideal demodulator); audio only in the host: `python/ffsk.py` (modulator, non-coherent demodulator), `python/nmtlink.py` links to osmocom-analog through two FIFOs (`tools/osmocom-analog/`), with handset/console scripts, SAT loop (latch 1 bit 2), speech paths, compandor and sound devices in the host, lockstep or real time; md5xtui.py `--nmt`. While the radio is off the bit grid goes on (base-station bits pass unheard, TX slots say off). No noise |
-| MD50 PROM A4-A7 | not modelled |
+| FFSK | bit level in the board (ideal demodulator); audio only in the host: `python/ffsk.py` (modulator, non-coherent demodulator), `python/nmtlink.py` links to osmocom-analog through two FIFOs (`tools/osmocom-analog/`), with handset/console scripts, SAT loop, speech paths and compandor (gates per model, `nmtlink.GATES`) and sound devices in the host, lockstep or real time; md5xtui.py `--nmt`. While the radio is off the bit grid goes on (base-station bits pass unheard, TX slots say off). No noise |
 | 93C06 write time, busy status | writes are instant |
 | 8253 GATE1 (inverted OUT0), OH1E's 455 kHz AFC measurement | gate not modelled |
 | Tone outputs | only one latch bit captured at a time (`audio_capture(bit=)`, default PHI); OH1E's CTCSS DAC in the PROM socket not modelled |
