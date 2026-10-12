@@ -66,17 +66,31 @@ import nmtframe as nf  # noqa: E402
 
 RATE = 48000
 BLOCK = 960                 # 20 ms
-CH1_DIV = 19376
+# synth divider of channel 1 (NMT-450, 25 kHz steps, 180 channels up):
+# MD59 from its RX LO (channel + 21.4 MHz), MD50 from its scan (18176-18355)
+CH1_DIV = {"MD59": 19376, "MD50": 18176}
 
-# output latch bits of the audio paths (latch, bit), ME59 manual's table
-SAT_GATE = (1, 2)           # "Ö": SAT from the receiver to the modulator
-EAR = (1, 1)                # H: earpiece
-MIC = (1, 3)                # S: handset microphone (also pulses at idle)
-LSP = (3, 3)                # HF: loudspeaker amplifier
-EXT_MIC = (3, 2)            # ES: external microphone
-CC = (7, 3)                 # ME59 compandor on; never set by the MD59 firmware
-ALO = (5, 2)                # alert tone generator
-KV = (5, 1)                 # its level
+# output latch gates of the audio paths: (latch, bit, level when on), from
+# the ME59 manual's output table and the ham sources' MD50/MD59 defines
+GATES = {
+    "MD59": {
+        "sat": (1, 2, 1),       # "Ö" (PHI): SAT from the receiver to the modulator
+        "ear": (1, 1, 1),       # H: earpiece
+        "mic": (1, 3, 1),       # S (HSM): handset microphone (also pulses at idle)
+        "lsp": (3, 3, 1),       # HF: loudspeaker amplifier
+        "cc": (7, 3, 1),        # ME59 compandor on; never set by the MD59 firmware
+        "alo": (5, 2, 1),       # alert tone generator
+        "kv": (5, 1, 1),        # its level
+    },
+    "MD50": {                   # AP1: no compandor; NPHI, NMIC active low
+        "sat": (1, 2, 0),
+        "ear": (1, 1, 1),
+        "mic": (1, 3, 0),
+        "lsp": (3, 3, 1),
+        "alo": (5, 2, 1),
+        "kv": (5, 1, 1),
+    },
+}
 ALERT_HZ = 2000.0           # a guess: set by R13/C10 on AP1, not documented
 
 # osmocom's wave samples are deviation / 4700 Hz: speech at its nominal
@@ -105,8 +119,10 @@ def read_exact(fd, n):
     return out
 
 
-def bit(r, lb):
-    return r.latch(lb[0]) >> lb[1] & 1
+def gate(r, name):
+    """a gate of GATES for this radio's model: 1 when on (0 if it has none)"""
+    g = GATES[r.model].get(name)
+    return int((r.latch(g[0]) >> g[1] & 1) == g[2]) if g else 0
 
 
 # ---- osmocom
@@ -508,7 +524,7 @@ class Link:
     def __init__(self, radio, channel, level=0.5, ear_gain=0.8, mic_gain=1.3,
                  compandor=True, log=print):
         self.r = radio
-        self.div = CH1_DIV + channel - 1
+        self.div = CH1_DIV[radio.model] + channel - 1
         self.r.air_channel(self.div)
         self.mod = Modulator(RATE)
         self.dem = Demodulator(RATE)
@@ -568,7 +584,7 @@ class Link:
         """The ME59 switches its compandor with CC; the MD59 firmware never
         sets that bit, and how it switches is not known: with compandor
         on, compand while the SAT loop is closed (a call in speech)"""
-        return bool(bit(self.r, CC)) or (self.compandor and bool(bit(self.r, SAT_GATE)))
+        return bool(gate(self.r, "cc")) or (self.compandor and bool(gate(self.r, "sat")))
 
     def ear_audio(self, n):
         """n samples for the earpiece/loudspeaker (after phone_audio):
@@ -577,11 +593,11 @@ class Link:
         x = np.concatenate([x, np.zeros(n - len(x))])
         if self.companding():
             x = self.expander(x)
-        on = bit(self.r, EAR) or bit(self.r, LSP)
+        on = gate(self.r, "ear") or gate(self.r, "lsp")
         x = x * self.ear_gain if on else np.zeros(n)
-        if bit(self.r, ALO):
+        if gate(self.r, "alo"):
             ph = self.alert_phase + 2 * np.pi * ALERT_HZ / RATE * np.arange(1, n + 1)
-            x = x + np.sin(ph) * (0.4 if bit(self.r, KV) else 0.15)
+            x = x + np.sin(ph) * (0.4 if gate(self.r, "kv") else 0.15)
             self.alert_phase = ph[-1] % (2 * np.pi)
         return x
 
@@ -611,16 +627,16 @@ class Link:
         self.pending = [x[n:]]
         x = x[:n].copy()
         sat, self.sat = self.sat[:n], self.sat[n:]
-        sat_on = bool(bit(self.r, SAT_GATE))
+        sat_on = bool(gate(self.r, "sat"))
         # S also pulses at idle (the ham sources' HSM); speech only goes
         # out in a call (SAT loop closed) and never over data
-        mic_on = (bool(bit(self.r, MIC) or bit(self.r, EXT_MIC)) and sat_on
+        mic_on = (bool(gate(self.r, "mic")) and sat_on
                   and not data)
         self.watch("microphone", mic_on)
         cc = self.companding()
         self.watch("SAT loop", sat_on)
-        self.watch("earpiece", bool(bit(self.r, EAR)))
-        self.watch("loudspeaker", bool(bit(self.r, LSP)))
+        self.watch("earpiece", bool(gate(self.r, "ear")))
+        self.watch("loudspeaker", bool(gate(self.r, "lsp")))
         if mic is None:
             mic = np.zeros(n)
         sp, self.mic_zi = signal.sosfilt(self.mic_sos, mic * self.mic_gain, zi=self.mic_zi)
@@ -668,6 +684,49 @@ def frames(bits):
     if i < 0:
         used = max(used, len(s) - len(sync) - 140)
     return out, max(0, used)
+
+
+def rom_image(spec, model):
+    """Path of the ROM image to load: a file, or "A+B" for the MD50's two
+    8 KB EPROMs (na0 at 0000, na1 at 4000, each mirrored in its 16 KB
+    window).  The original MD50 dump (na1) is corrected in a temporary
+    copy, never the file: OH5NXO's dump has a `br` at 0x4E58 where the
+    4021 read of LOCAL* (bit 1 of 0x8338) would be `b3`, which keeps the
+    phone in LOCAL mode, and its ROM test (0x56BE) then fails on the
+    stored sum of 4000-5EFF (0x5FF3-F5), which is set to the actual sum
+    (still 0x2D off after the `b3`: more changes than this one)."""
+    if "+" not in spec and model != "MD50":
+        return spec
+    parts = [open(p, "rb").read() for p in spec.split("+")]
+    if len(parts) == 2 and all(len(p) == 8192 for p in parts):
+        img = bytearray(parts[0] * 2 + parts[1] * 2)
+    else:
+        img = bytearray(b"".join(parts))
+    if model == "MD50" and len(img) == 0x8000:
+        if img[0x4E56:0x4E5A] == bytes([0x7B, 0x7A, 0x30, 0x5C]):
+            for base in (0x4000, 0x6000):
+                img[base + 0x0E58] = 0x36
+        total = sum(img[0x4000:0x5F00]) & 0xFFFFFF
+        for base in (0x4000, 0x6000):
+            img[base + 0x1FF3:base + 0x1FF6] = total.to_bytes(3, "big")
+    f = tempfile.NamedTemporaryFile(prefix="md5x_", suffix=".bin", delete=False)
+    f.write(img)
+    f.close()
+    return f.name
+
+
+def parse_prom(text):
+    """MD50 ID PROM nibbles from hex digits (spaces ignored), e.g.
+    "8123456 1234 00000": Z X1..X6, 4-digit code, flags (page 0)"""
+    return [int(c, 16) for c in text if not c.isspace()]
+
+
+def nmt_defaults(model, opts):
+    """osmocom's options for this model: the MD50 has no compandor (-C 0)"""
+    opts = list(opts or DEFAULT_NMT_OPTS)
+    if model == "MD50" and not {"-C", "--compandor"} & set(opts):
+        opts += ["-C", "0"]
+    return opts
 
 
 def warm_boot(r):
@@ -801,11 +860,12 @@ def main():
         argv, nmt_opts = argv[:i], argv[i + 1:]
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("rom")
+    ap.add_argument("rom", help="ROM image, or na0+na1 for the MD50's two EPROMs")
     ap.add_argument("--nmt", required=True, help="osmocom-analog's nmt binary")
-    ap.add_argument("--model", default="MD59")
-    ap.add_argument("--cu", default="CU59")
-    ap.add_argument("--eeprom", help="16 hex words, comma separated")
+    ap.add_argument("--model", default="MD59", type=str.upper, choices=["MD59", "MD50"])
+    ap.add_argument("--cu", type=str.upper, help="handset (default CU59, MD50: CU53)")
+    ap.add_argument("--eeprom", help="MD59 93C06: 16 hex words, comma separated")
+    ap.add_argument("--prom", help="MD50 ID PROM: hex nibbles, e.g. '8123456 1234 00000'")
     ap.add_argument("--channel", type=int, default=1)
     ap.add_argument("--seconds", type=float, default=60.0)
     ap.add_argument("--prefill", type=float, default=0.02,
@@ -826,12 +886,19 @@ def main():
                     help="also osmocom's level lines (twice a second)")
     add_audio_args(ap)
     a = ap.parse_args(argv)
+    a.cu = a.cu or ("CU53" if a.model == "MD50" else "CU59")
     if (a.net_audio or a.radio_out or a.radio_in or a.hold_music) and not a.realtime:
         ap.error("sound devices need --realtime")
 
-    r = Radio(a.rom, model=a.model, cu=a.cu, power=False)
+    rom = rom_image(a.rom, a.model)
+    r = Radio(rom, model=a.model, cu=a.cu, power=False)
+    if rom != a.rom:
+        os.unlink(rom)
     if a.eeprom:
         r.eeprom([int(w, 16) for w in a.eeprom.split(",")])
+    if a.prom:
+        r.prom(parse_prom(a.prom))
+    nmt_opts = nmt_defaults(a.model, nmt_opts)
     if not a.cold:
         warm_boot(r)
     t_wall = time.monotonic()
@@ -843,7 +910,7 @@ def main():
     s = Session(r, osmo, a.channel, a.prefill, ear=ear, mic=mic, hold=net,
                 log=lambda m: print(m, flush=True),
                 ear_gain=a.ear_gain, mic_gain=a.mic_gain,
-                compandor=not a.no_compandor)
+                compandor=not a.no_compandor and a.model != "MD50")
     script = handset_script(a.keys)
     bs_script = sorted((float(t), k) for t, k in
                        (item.split(":", 1) for item in filter(None, a.bs_keys.split(","))))

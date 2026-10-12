@@ -25,7 +25,10 @@ base station, real time):
     python3 emu/python/md5xtui.py --rom reference/oh5nxo/mods/Mx5x/orig/MD59SB.raw.orig \
         --model MD59 --cu CU59 --eeprom 8123,456F,1234,0,111A,26FF,FFFF,...,14DC \
         --nmt ~/src/osmo/osmocom-analog/src/nmt/nmt --radio-out pipewire --radio-in pipewire
-    (dial: digits, then h for off-hook; h again hangs up.)  Sound devices
+    (dial: digits, then h for off-hook; h again hangs up.)  The MD50:
+    --rom .../orig/na0+.../orig/na1 --model MD50 --cu CU53
+    --prom '8123456 1234 00000' (corrected in a temporary copy, see
+    nmtlink.rom_image; no compandor, osmocom -C 0).  Sound devices
     are ALSA names ("pipewire:NODE=<node>" for one PipeWire node):
     --radio-out/--radio-in the handset, --net-audio the network's end
     (osmocom's call audio), --hold-music FILE plays FILE into calls
@@ -161,7 +164,7 @@ class Net:
     """the radio linked to osmocom-analog's NMT (nmtlink.Session)"""
 
     def __init__(self, r, args):
-        self.opts = shlex.split(args.nmt_opts)
+        self.opts = nmtlink.nmt_defaults(r.model, shlex.split(args.nmt_opts))
         self.log = collections.deque(maxlen=50)
         self.file = open(args.nmt_log, "w") if args.nmt_log else None
 
@@ -185,7 +188,7 @@ class Net:
             self.osmo.listeners.append(net.on_line)
         self.session = nmtlink.Session(
             r, self.osmo, args.channel, ear=ear, mic=mic, hold=net, log=log, ear_gain=args.ear_gain, mic_gain=args.mic_gain,
-            compandor=not args.no_compandor)
+            compandor=not args.no_compandor and r.model != "MD50")
         self.session.start()
 
     def close(self):
@@ -211,10 +214,15 @@ def open_radio(args):
     if args.ram and os.path.exists(args.ram):
         with open(args.ram, "rb") as f:
             ram = f.read()
-    r = Radio(rom, lst, model=model or "MD59", cu=cu or "CU59", ram=ram,
+    path = nmtlink.rom_image(rom, model) if args.rom else rom
+    r = Radio(path, lst, model=model or "MD59", cu=cu or "CU59", ram=ram,
               ram_size=args.ram_size)
+    if path != rom:
+        os.unlink(path)
     if args.eeprom:
         r.eeprom([int(w, 16) for w in args.eeprom.split(",")])
+    if args.prom:
+        r.prom(nmtlink.parse_prom(args.prom))
     if ram is None and "tx_start" in r.syms and "TX_START" in r.syms:
         # OH1E with zeroed RAM refuses all TX: use its band defaults
         r.write("tx_start", r.syms["TX_START"].to_bytes(2, "little"))
@@ -349,7 +357,7 @@ if __name__ == "__main__":
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fw", default="mx5x-md59",
                     help="firmware from tests/md5x/roms.py (default mx5x-md59)")
-    ap.add_argument("--rom", help="ROM image instead of --fw")
+    ap.add_argument("--rom", help="ROM image instead of --fw (na0+na1: the MD50's EPROMs)")
     ap.add_argument("--lst", help="as06 listing for --rom (symbols, font)")
     ap.add_argument("--model", type=str.upper, choices=["MD50", "MD59", "ME59"])
     ap.add_argument("--cu", type=str.upper, choices=["CU53", "CU59"])
@@ -358,6 +366,7 @@ if __name__ == "__main__":
                     help="RAM bytes (default 1024 MD50, 2048 MD59/ME59)")
     ap.add_argument("--script", help="headless: key script, print screen")
     ap.add_argument("--eeprom", help="93C06 contents: 16 hex words, comma separated")
+    ap.add_argument("--prom", help="MD50 ID PROM: hex nibbles, e.g. '8123456 1234 00000'")
     ap.add_argument("--nmt", metavar="BINARY",
                     help="link to osmocom-analog's NMT base station (its nmt binary)")
     ap.add_argument("--nmt-opts", default=" ".join(nmtlink.DEFAULT_NMT_OPTS),

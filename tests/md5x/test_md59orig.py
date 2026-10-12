@@ -221,6 +221,27 @@ class TestMD50Original(unittest.TestCase):
         self.assertEqual((int.from_bytes(img[0x5FF3:0x5FF6], "big")
                           - sum(img[0x4000:0x5F00])) & 0xFFFFFF, 0x33)
 
+    def test_corrected_image_scans(self):
+        """nmtlink.rom_image restores the LOCAL* read (b3 at 0x4E58) and
+        the stored ROM sum: the phone then scans all 180 channels
+        (dividers 18176-18355)"""
+        import nmtlink
+        d = next(os.path.dirname(c) for c in CANDS
+                 if os.path.isfile(os.path.join(os.path.dirname(c), "na0")))
+        path = nmtlink.rom_image(os.path.join(d, "na0") + "+" + os.path.join(d, "na1"), "MD50")
+        self.addCleanup(os.unlink, path)
+        img = open(path, "rb").read()
+        self.assertEqual(img[0x4E58], 0x36)
+        r = Radio(path, model="MD50", cu="CU53", power=False)
+        r.prom(nmtlink.parse_prom("8123456 1234 00000"))
+        r.power(True)
+        r.run(3.0)
+        divs = set()
+        for _ in range(500):
+            r.run(0.05)
+            divs.add(r.synth()["div"])
+        self.assertEqual((min(divs), max(divs), len(divs)), (18176, 18355, 180))
+
 
 if __name__ == "__main__":
     unittest.main()
