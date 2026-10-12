@@ -158,6 +158,15 @@ progmodule_dcu(const md5x *m)
 }
 
 void
+md5x_prom(md5x *m, const uint8_t *nibbles, int n)
+{
+	memset(m->prom, 0, sizeof(m->prom));	/* blank: all bits 0 */
+	for (int i = 0; i < n && i < 256; i++)
+		m->prom[i] = nibbles[i] & 15;
+	m->prom_loaded = 1;
+}
+
+void
 md5x_progmodule(md5x *m, const uint8_t *nibbles, int n)
 {
 	if (n > (int)sizeof(m->pm_nib))
@@ -645,8 +654,15 @@ mem_read(void *ctx, uint16_t a)
 	uint8_t *r = ram_at(m, a);
 	if (r)
 		return *r;
-	if (m->model == MD5X_MD50 && a >= 0xc000)
-		return m->prom_loaded ? (uint8_t)(0xf0 | (m->prom[a & 0xff] & 15)) : 0xff;
+	if (m->model == MD5X_MD50 && a >= 0xc000) {
+		/* 74S287: A0-A3 from the bus, A4-A6 from latch 7 bits 1-3,
+		 * A7 from latch 6 bit 1 (as the original firmware drives
+		 * them, 0x4CB3); four data bits */
+		if (!m->prom_loaded)
+			return 0xff;
+		int hi = (m->latch[7] >> 1 & 7) | (m->latch[6] >> 1 & 1) << 3;
+		return (uint8_t)(0xf0 | (m->prom[hi << 4 | (a & 15)] & 15));
+	}
 	if (m->model == MD5X_ME59 && a >= 0xe000)
 		return m->adc_result;
 	return 0xff;

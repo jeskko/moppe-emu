@@ -24,7 +24,7 @@ base station, real time):
                  F6  the network hangs up
     python3 emu/python/md5xtui.py --rom reference/oh5nxo/mods/Mx5x/orig/MD59SB.raw.orig \
         --model MD59 --cu CU59 --eeprom 8123,456F,1234,0,111A,26FF,FFFF,...,14DC \
-        --nmt ~/osmo/osmocom-analog/src/nmt/nmt --radio-out pipewire --radio-in pipewire
+        --nmt ~/src/osmo/osmocom-analog/src/nmt/nmt --radio-out pipewire --radio-in pipewire
     (dial: digits, then h for off-hook; h again hangs up.)  Sound devices
     are ALSA names ("pipewire:NODE=<node>" for one PipeWire node):
     --radio-out/--radio-in the handset, --net-audio the network's end

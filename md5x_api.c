@@ -199,6 +199,7 @@ md5xapi_eeprom(md5x *m, uint16_t *out, const uint16_t *in)
 }
 
 void md5xapi_progmodule(md5x *m, const uint8_t *nib, int n) { md5x_progmodule(m, nib, n); }
+void md5xapi_prom(md5x *m, const uint8_t *nib, int n) { md5x_prom(m, nib, n); }
 
 int  md5xapi_air_push(md5x *m, const uint8_t *b, int n) { return md5x_air_push(m, b, n); }
 void md5xapi_air_channel(md5x *m, int div) { md5x_air_channel(m, (uint32_t)div); }

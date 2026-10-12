@@ -6,7 +6,7 @@ receiver, and the phone's transmitter into the base station's receiver
 (--read-rx-wave).  osmocom runs in a pseudo-terminal (its console needs
 one), started by this script:
 
-    python3 nmtlink.py --nmt ~/osmo/osmocom-analog/src/nmt/nmt ROM \\
+    python3 nmtlink.py --nmt ~/src/osmo/osmocom-analog/src/nmt/nmt ROM \\
         --eeprom 8123,456F,... --keys 26:0123456,30:offhook,50:onhook
 
 Options after a lone "--" go to osmocom (default -k 1 -Y DK,1).

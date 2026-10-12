@@ -172,5 +172,55 @@ class TestMD59Original(unittest.TestCase):
         self.assertIn("SERV", r.led_names())
 
 
+
+def md50_image():
+    """the MD50 original, na0 at 0000 and na1 at 4000, each 8 KB mirrored
+    in its 16 KB window; None if the dumps are not there"""
+    for c in CANDS:
+        d = os.path.dirname(c)
+        a, b = os.path.join(d, "na0"), os.path.join(d, "na1")
+        if os.path.isfile(a) and os.path.isfile(b):
+            x, y = open(a, "rb").read(), open(b, "rb").read()
+            return x + x + y + y
+    return None
+
+
+@unittest.skipUnless(md50_image(), "original MD50 dumps not found (make refs)")
+class TestMD50Original(unittest.TestCase):
+
+    def radio(self, prom):
+        import tempfile
+        img = md50_image()
+        f = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
+        f.write(img)
+        f.close()
+        self.addCleanup(os.unlink, f.name)
+        r = Radio(f.name, model="MD50", cu="CU53", power=False)
+        r.prom(prom)
+        r.power(True)
+        r.run(4.0)
+        return r
+
+    def test_id_prom_last_page(self):
+        """the last page whose first nibble is not 0 is the number (page
+        select from latch 7 bits 1-3 and latch 6 bit 1)"""
+        p0 = [8, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 0, 0, 0, 0, 0]
+        p1 = [9, 7, 6, 5, 4, 3, 2, 4, 3, 2, 1, 0, 0, 0, 0, 0]
+        r = self.radio(p0 + p1)
+        self.assertEqual(list(r.read(0x83F6, 7)), p1[:7])
+        self.assertEqual(list(r.read(0x83D0, 4)), [4, 3, 2, 1])
+        r = self.radio(p0)
+        self.assertEqual(list(r.read(0x83F6, 7)), p0[:7])
+
+    def test_na1_checksum_short(self):
+        """the firmware's ROM test (0x56BE) sums 0000-1FFF and 4000-5EFF
+        against 5FF0-5FF5; the na1 dump is 0x33 short"""
+        img = md50_image()
+        self.assertEqual(sum(img[0:0x2000]) & 0xFFFFFF,
+                         int.from_bytes(img[0x5FF0:0x5FF3], "big"))
+        self.assertEqual((int.from_bytes(img[0x5FF3:0x5FF6], "big")
+                          - sum(img[0x4000:0x5F00])) & 0xFFFFFF, 0x33)
+
+
 if __name__ == "__main__":
     unittest.main()

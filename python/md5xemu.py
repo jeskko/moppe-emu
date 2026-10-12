@@ -105,6 +105,7 @@ def lib():
             "md5xapi_eeprom": (None, [vp, C.POINTER(C.c_uint16),
                                       C.POINTER(C.c_uint16)]),
             "md5xapi_progmodule": (None, [vp, C.c_char_p, C.c_int]),
+            "md5xapi_prom": (None, [vp, C.c_char_p, C.c_int]),
             "md5xapi_air_push": (C.c_int, [vp, C.c_char_p, C.c_int]),
             "md5xapi_air_channel": (None, [vp, C.c_int]),
             "md5xapi_air_buffered": (C.c_int, [vp]),
@@ -296,6 +297,14 @@ class Radio:
             self.L.md5xapi_eeprom(self.m, None, src)
         self.L.md5xapi_eeprom(self.m, buf, None)
         return list(buf)
+
+    def prom(self, nibbles):
+        """MD50 ID PROM (74S287): nibbles from address 0 (page = 16
+        nibbles, A4-A7 from the latches), the rest blank (0).  The
+        original firmware uses the last page whose first nibble is not 0:
+        Z X1..X6, then 0x83D0.. (lock code 4 digits, flags), 0 = digit 0."""
+        b = bytes(n & 15 for n in nibbles)
+        self.L.md5xapi_prom(self.m, b, len(b))
 
     def progmodule(self, nibbles=(0, 0, 0, 0, 0, 5, 0xA)):
         """Fit the OK 59 / TK 59 programming module (original MD59

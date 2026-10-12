@@ -222,5 +222,7 @@ void   md5x_audio_capture(md5x *m, int on);
 void   md5x_breakpoint(md5x *m, uint16_t a, int on);
 void   md5x_iolog(md5x *m, int on, int memw);
 void   md5x_progmodule(md5x *m, const uint8_t *nibbles, int n);
+/* MD50 ID PROM (74S287, 256 x 4): nibbles from address 0, the rest 0 */
+void   md5x_prom(md5x *m, const uint8_t *nibbles, int n);
 
 #endif
